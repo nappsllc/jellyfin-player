@@ -13,7 +13,7 @@ struct SongListView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     if player.current != nil {
                         NowPlayingHeader()
                             .frame(maxWidth: .infinity)
@@ -38,6 +38,7 @@ struct SongListView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 4)
 
+                    LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(model.songs) { song in
                         Button {
                             player.play(songs: model.songs, startAt: song)
@@ -50,6 +51,7 @@ struct SongListView: View {
                         }
                         .buttonStyle(.plain)
                         Divider().padding(.leading, 76)
+                    }
                     }
                 }
             }
