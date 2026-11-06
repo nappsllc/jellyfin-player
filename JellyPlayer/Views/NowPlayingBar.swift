@@ -9,6 +9,8 @@ struct NowPlayingHeader: View {
         if let song = player.current {
             VStack(spacing: 16) {
                 Artwork(url: model.client.imageURL(for: song, size: 800))
+                    .overlay { coverControls }
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .frame(maxWidth: 320)
                     .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
 
@@ -25,42 +27,53 @@ struct NowPlayingHeader: View {
                 }
 
                 PlaybackScrubber()
-
-                HStack {
-                    Button { model.shuffle.toggle() } label: {
-                        Image(systemName: "shuffle")
-                            .font(.title3)
-                            .foregroundStyle(model.shuffle ? Color.accentColor : Color.secondary)
-                    }
-                    .accessibilityLabel(model.shuffle ? "Shuffle on" : "Shuffle off")
-                    Spacer()
-                    Button { player.previous() } label: {
-                        Image(systemName: "backward.fill").font(.title)
-                    }
-                    .accessibilityLabel("Previous")
-                    Spacer()
-                    Button { player.togglePlayPause() } label: {
-                        Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 64))
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
-                    Spacer()
-                    Button { player.next() } label: {
-                        Image(systemName: "forward.fill").font(.title)
-                    }
-                    .accessibilityLabel("Next")
-                    Spacer()
-                    // Balances the shuffle button so the play button stays centred.
-                    Image(systemName: "shuffle").font(.title3).hidden()
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 8)
             }
             .padding(.horizontal, 24)
             .padding(.top, 8)
             .padding(.bottom, 16)
         }
+    }
+
+    /// Previous / play-pause / next drawn over the cover on a soft dark scrim, with shuffle in the corner.
+    private var coverControls: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+
+            HStack(spacing: 44) {
+                Button { player.previous() } label: {
+                    Image(systemName: "backward.fill").font(.system(size: 30))
+                }
+                .accessibilityLabel("Previous")
+                Button { player.togglePlayPause() } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 52))
+                        .frame(width: 64, height: 64)
+                }
+                .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                Button { player.next() } label: {
+                    Image(systemName: "forward.fill").font(.system(size: 30))
+                }
+                .accessibilityLabel("Next")
+            }
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button { model.shuffle.toggle() } label: {
+                        Image(systemName: "shuffle")
+                            .font(.system(size: 18, weight: .semibold))
+                            .padding(10)
+                            .background(model.shuffle ? Color.accentColor : Color.black.opacity(0.35), in: Circle())
+                    }
+                    .accessibilityLabel(model.shuffle ? "Shuffle on" : "Shuffle off")
+                }
+            }
+            .padding(12)
+        }
+        .foregroundStyle(.white)
+        .shadow(color: .black.opacity(0.4), radius: 4)
+        .buttonStyle(.plain)
     }
 }
 
