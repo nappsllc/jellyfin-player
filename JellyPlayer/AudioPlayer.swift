@@ -19,6 +19,7 @@ final class AudioPlayer: ObservableObject {
     private var index = 0
     private var consecutiveFailures = 0
     private var lastFailure: String?
+    private var usingTranscode = false
 
     private let player = AVPlayer()
     private let client: JellyfinClient
@@ -128,8 +129,11 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: Loading
 
-    private func load(at i: Int, autoplay: Bool) {
-        guard queue.indices.contains(i), let url = client.streamURL(for: queue[i]) else { return }
+    private func load(at i: Int, autoplay: Bool, transcoded: Bool = false) {
+        guard queue.indices.contains(i) else { return }
+        let url = transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i])
+        guard let url else { return }
+        usingTranscode = transcoded
         index = i
         let song = queue[i]
         current = song
@@ -157,7 +161,12 @@ final class AudioPlayer: ObservableObject {
             consecutiveFailures = 0
         case .failed:
             lastFailure = error
-            skipAfterFailure()
+            if !usingTranscode {
+                // The original file isn't playable on iOS; ask the server to transcode it.
+                load(at: index, autoplay: true, transcoded: true)
+            } else {
+                skipAfterFailure()
+            }
         default:
             break
         }
@@ -165,7 +174,6 @@ final class AudioPlayer: ObservableObject {
 
     private func skipAfterFailure() {
         consecutiveFailures += 1
-        // Give up if every song in the queue failed (e.g. server unreachable).
         // Stop after 3 failures in a row (e.g. server unreachable or stream rejected) and say why.
         guard consecutiveFailures < min(3, queue.count) else {
             player.pause()

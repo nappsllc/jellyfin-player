@@ -142,8 +142,21 @@ final class JellyfinClient {
 
     // MARK: URLs
 
-    /// Universal endpoint: the server direct-streams formats iOS can play and transcodes the rest to AAC over HLS.
-    func streamURL(for item: JFItem) -> URL? {
+    /// The original file, streamed as-is with byte-range support. iOS plays MP3, AAC/M4A, ALAC, FLAC and WAV
+    /// this way, and it avoids server-side HLS transcoding, which some servers (e.g. Remux) serve broken.
+    func directStreamURL(for item: JFItem) -> URL? {
+        guard let s = session else { return nil }
+        var components = URLComponents(url: s.serverURL.appending(path: "Audio/\(item.id)/stream"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "static", value: "true"),
+            URLQueryItem(name: "ApiKey", value: s.accessToken),
+            URLQueryItem(name: "api_key", value: s.accessToken),
+        ]
+        return components?.url
+    }
+
+    /// Fallback for formats iOS can't decode (e.g. Ogg, Opus, WMA): the server transcodes to AAC over HLS.
+    func transcodedStreamURL(for item: JFItem) -> URL? {
         guard let s = session else { return nil }
         var components = URLComponents(url: s.serverURL.appending(path: "Audio/\(item.id)/universal"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
