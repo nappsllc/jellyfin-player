@@ -1,0 +1,22 @@
+# Optional: regenerate the Xcode project with XcodeGen (`brew install xcodegen && xcodegen`).
+name: JellyPlayer
+options:
+  bundleIdPrefix: pw.napps
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  JellyPlayer:
+    type: application
+    platform: iOS
+    sources: [JellyPlayer]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: pw.napps.JellyPlayer
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: JellyPlayer
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
