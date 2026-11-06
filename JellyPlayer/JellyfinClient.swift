@@ -56,6 +56,12 @@ final class JellyfinClient {
         return url
     }
 
+    /// Headers for AVPlayer requests, so the stream is authorized even if the server ignores query-string tokens.
+    var streamHeaders: [String: String] {
+        guard let token = session?.accessToken else { return [:] }
+        return ["Authorization": authorization(token: token), "X-Emby-Token": token]
+    }
+
     private func authorization(token: String?) -> String {
         var value = "MediaBrowser Client=\"\(Self.clientName)\", Device=\"iOS\", DeviceId=\"\(deviceId)\", Version=\"\(Self.clientVersion)\""
         if let token { value += ", Token=\"\(token)\"" }
@@ -143,6 +149,7 @@ final class JellyfinClient {
         components?.queryItems = [
             URLQueryItem(name: "UserId", value: s.userId),
             URLQueryItem(name: "DeviceId", value: deviceId),
+            URLQueryItem(name: "ApiKey", value: s.accessToken),
             URLQueryItem(name: "api_key", value: s.accessToken),
             URLQueryItem(name: "Container", value: "mp3,aac,m4a|aac,m4b|aac,flac,alac,m4a|alac,wav"),
             URLQueryItem(name: "TranscodingContainer", value: "ts"),

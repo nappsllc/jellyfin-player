@@ -10,7 +10,9 @@ struct SongListView: View {
                 Button {
                     player.play(songs: model.songs)
                 } label: {
-                    Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
+                    Label("Play", systemImage: "play.fill")
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
 

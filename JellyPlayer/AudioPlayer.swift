@@ -10,12 +10,15 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var duration: Double = 0
+    /// Set when playback fails, so the UI can show why.
+    @Published var errorMessage: String?
 
     private(set) var shuffleEnabled = false
     private var queue: [JFItem] = []
     private var originalOrder: [JFItem] = []
     private var index = 0
     private var consecutiveFailures = 0
+    private var lastFailure: String?
 
     private let player = AVPlayer()
     private let client: JellyfinClient
@@ -133,10 +136,12 @@ final class AudioPlayer: ObservableObject {
         elapsed = 0
         duration = song.duration ?? 0
 
-        let item = AVPlayerItem(url: url)
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": client.streamHeaders])
+        let item = AVPlayerItem(asset: asset)
         statusObservation = item.observe(\.status) { [weak self] item, _ in
             let status = item.status
-            Task { @MainActor in self?.itemStatusChanged(status) }
+            let error = item.error?.localizedDescription
+            Task { @MainActor in self?.itemStatusChanged(status, error: error) }
         }
         player.replaceCurrentItem(with: item)
         if autoplay { resume() }
@@ -146,11 +151,12 @@ final class AudioPlayer: ObservableObject {
         loadArtwork(for: song)
     }
 
-    private func itemStatusChanged(_ status: AVPlayerItem.Status) {
+    private func itemStatusChanged(_ status: AVPlayerItem.Status, error: String?) {
         switch status {
         case .readyToPlay:
             consecutiveFailures = 0
         case .failed:
+            lastFailure = error
             skipAfterFailure()
         default:
             break
@@ -160,8 +166,10 @@ final class AudioPlayer: ObservableObject {
     private func skipAfterFailure() {
         consecutiveFailures += 1
         // Give up if every song in the queue failed (e.g. server unreachable).
-        guard consecutiveFailures < queue.count else {
+        // Stop after 3 failures in a row (e.g. server unreachable or stream rejected) and say why.
+        guard consecutiveFailures < min(3, queue.count) else {
             player.pause()
+            errorMessage = "Couldn't play songs from the server: \(lastFailure ?? "unknown error")"
             return
         }
         next()
@@ -212,8 +220,10 @@ final class AudioPlayer: ObservableObject {
             forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil, queue: .main
         ) { [weak self] note in
             let item = note.object as? AVPlayerItem
+            let error = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription
             MainActor.assumeIsolated {
                 guard let self, item === self.player.currentItem else { return }
+                self.lastFailure = error
                 self.skipAfterFailure()
             }
         })
