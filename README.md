@@ -21,6 +21,16 @@ Needs a Mac with Xcode 16 or newer and iOS 17+ on the device.
 3. Pick your iPhone or a simulator and press Run.
 4. On first launch Settings opens: enter the server URL (e.g. `http://192.168.1.10:8096`), username and password, then choose a folder.
 
+## Install from Windows (no Mac, no paid account)
+
+Every push to `main` builds an unsigned `JellyPlayer.ipa` on GitHub's Mac runners.
+
+1. Open the repo's **Actions** tab → latest **Build IPA** run → download the **JellyPlayer-ipa** artifact and unzip it.
+2. Install it with [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io), signing in with your free Apple ID. AltStore can refresh it automatically.
+3. On the iPhone: turn on **Developer Mode** (Settings → Privacy & Security), and trust your Apple ID under Settings → General → VPN & Device Management.
+
+With a free Apple ID the app expires after 7 days and has to be re-signed (AltStore does this for you while your PC is reachable).
+
 If the project ever gets out of shape, `brew install xcodegen && xcodegen` regenerates it from `project.yml`.
 
 ## Code map
