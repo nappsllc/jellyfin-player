@@ -3,48 +3,110 @@ import SwiftUI
 struct SongListView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
+    @State private var headerCollapsed = false
+
+    private static let headerID = "nowPlayingHeader"
+    private static let scrollSpace = "songScroll"
+    /// The big tile counts as scrolled away once less than this much of it is still visible.
+    private static let collapseThreshold: CGFloat = 90
 
     var body: some View {
-        List {
-            HStack(spacing: 12) {
-                Button {
-                    player.play(songs: model.songs)
-                } label: {
-                    Label("Play", systemImage: "play.fill")
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button {
-                    model.shuffle.toggle()
-                } label: {
-                    Label(model.shuffle ? "Shuffle on" : "Shuffle off", systemImage: "shuffle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(model.shuffle ? Color.accentColor : Color.secondary)
-            }
-            .controlSize(.large)
-            .listRowSeparator(.hidden)
-
-            Section {
-                ForEach(model.songs) { song in
-                    Button {
-                        player.play(songs: model.songs, startAt: song)
-                    } label: {
-                        SongRow(song: song,
-                                isCurrent: player.current?.id == song.id,
-                                isPlaying: player.isPlaying)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if player.current != nil {
+                        NowPlayingHeader()
+                            .frame(maxWidth: .infinity)
+                            .id(Self.headerID)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: HeaderBottomKey.self,
+                                        value: geo.frame(in: .named(Self.scrollSpace)).maxY
+                                    )
+                                }
+                            )
+                        Divider()
+                    } else {
+                        startButtons
                     }
-                    .buttonStyle(.plain)
+
+                    Text("\(model.songs.count) songs")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                        .padding(.top, 12)
+                        .padding(.bottom, 4)
+
+                    ForEach(model.songs) { song in
+                        Button {
+                            player.play(songs: model.songs, startAt: song)
+                        } label: {
+                            SongRow(song: song,
+                                    isCurrent: player.current?.id == song.id,
+                                    isPlaying: player.isPlaying)
+                                .padding(.horizontal)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 76)
+                    }
                 }
-            } header: {
-                Text("\(model.songs.count) songs")
             }
+            .coordinateSpace(name: Self.scrollSpace)
+            .onPreferenceChange(HeaderBottomKey.self) { bottom in
+                let collapsed = bottom < Self.collapseThreshold
+                if collapsed != headerCollapsed {
+                    withAnimation(.easeInOut(duration: 0.2)) { headerCollapsed = collapsed }
+                }
+            }
+            .onChange(of: player.current == nil) { _, stopped in
+                if stopped { headerCollapsed = false }
+            }
+            .overlay(alignment: .top) {
+                if headerCollapsed && player.current != nil {
+                    NowPlayingBar {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(Self.headerID, anchor: .top)
+                        }
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .refreshable { await model.reload() }
         }
-        .listStyle(.plain)
-        .refreshable { await model.reload() }
+    }
+
+    /// Shown when nothing is playing yet (e.g. auto-play is off).
+    private var startButtons: some View {
+        HStack(spacing: 12) {
+            Button {
+                player.play(songs: model.songs)
+            } label: {
+                Label("Play", systemImage: "play.fill")
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button {
+                model.shuffle.toggle()
+            } label: {
+                Label(model.shuffle ? "Shuffle on" : "Shuffle off", systemImage: "shuffle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(model.shuffle ? Color.accentColor : Color.secondary)
+        }
+        .controlSize(.large)
+        .padding()
+    }
+}
+
+private struct HeaderBottomKey: PreferenceKey {
+    static var defaultValue: CGFloat = .greatestFiniteMagnitude
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = min(value, nextValue())
     }
 }
 

@@ -34,9 +34,7 @@ struct ContentView: View {
                     .accessibilityLabel("Settings")
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                if player.current != nil { NowPlayingBar() }
-            }
+            .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(isPresented: $model.showSettings) {
             SettingsView()
