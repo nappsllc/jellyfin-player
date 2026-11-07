@@ -95,7 +95,7 @@ final class ImageCache: @unchecked Sendable {
 /// Least recently played files are removed once the cache passes `maxBytes`.
 @MainActor
 final class AudioCache {
-    static let maxBytes: Int64 = 2_000_000_000
+    static let maxBytes: Int64 = 1_000_000_000
 
     private let directory = cachesDirectory("audio")
     private var inFlight = Set<String>()
@@ -138,6 +138,14 @@ final class AudioCache {
             guard (try? FileManager.default.moveItem(at: temp, to: destination)) != nil else { return }
             evictIfNeeded()
         }
+    }
+
+    /// Saves a song that was downloaded while it played.
+    func save(_ data: Data, songId: String, mimeType: String) {
+        guard let ext = Self.extensions[mimeType.lowercased()], !isCached(songId) else { return }
+        let destination = directory.appendingPathComponent("\(songId).\(ext)")
+        guard (try? data.write(to: destination, options: .atomic)) != nil else { return }
+        evictIfNeeded()
     }
 
     private func evictIfNeeded() {

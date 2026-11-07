@@ -21,6 +21,7 @@ final class AudioPlayer: ObservableObject {
     private var lastFailure: String?
     private var usingTranscode = false
     let audioCache = AudioCache()
+    private var loader: DownloadingLoader?
     /// Save played songs (and the next one in the queue) on the device.
     var cacheAudio = true
 
@@ -144,9 +145,23 @@ final class AudioPlayer: ObservableObject {
         elapsed = 0
         duration = song.duration ?? 0
 
-        let asset = localFile != nil
-            ? AVURLAsset(url: url)
-            : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": client.streamHeaders])
+        loader?.cancel()
+        loader = nil
+        let asset: AVURLAsset
+        if localFile != nil {
+            asset = AVURLAsset(url: url)
+        } else if cacheAudio && !transcoded {
+            // Download the file once and play it as it arrives; it's saved to the device when complete.
+            let songId = song.id
+            let cache = audioCache
+            let newLoader = DownloadingLoader(remoteURL: url, headers: client.streamHeaders) { data, mimeType in
+                Task { @MainActor in cache.save(data, songId: songId, mimeType: mimeType) }
+            }
+            loader = newLoader
+            asset = newLoader.makeAsset()
+        } else {
+            asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": client.streamHeaders])
+        }
         let item = AVPlayerItem(asset: asset)
         statusObservation = item.observe(\.status) { [weak self] item, _ in
             let status = item.status
@@ -179,15 +194,12 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    /// Lazily saves the playing song and pre-loads the next one, so it starts instantly.
+    /// Pre-loads the next song in the queue so it starts instantly. (The playing song saves itself as it downloads.)
     private func cacheCurrentAndNext() {
-        guard cacheAudio, !queue.isEmpty else { return }
-        var songs = [queue[index]]
-        if queue.count > 1 { songs.append(queue[(index + 1) % queue.count]) }
-        for song in songs {
-            guard let url = client.directStreamURL(for: song) else { continue }
-            audioCache.store(songId: song.id, from: url, headers: client.streamHeaders)
-        }
+        guard cacheAudio, queue.count > 1 else { return }
+        let nextSong = queue[(index + 1) % queue.count]
+        guard let url = client.directStreamURL(for: nextSong) else { return }
+        audioCache.store(songId: nextSong.id, from: url, headers: client.streamHeaders)
     }
 
     private func skipAfterFailure() {

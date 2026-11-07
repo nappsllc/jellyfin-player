@@ -76,7 +76,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Storage")
                 } footer: {
-                    Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Up to 2 GB of music is kept; the oldest songs are removed first.")
+                    Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Up to 1 GB of music is kept; the oldest songs are removed first.")
                 }
             }
             .onAppear { cacheSize = model.cacheSize() }
