@@ -4,6 +4,9 @@ import SwiftUI
 struct NowPlayingHeader: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
+    @State private var availableWidth: CGFloat = 320
+
+    private var coverSide: CGFloat { max(min(availableWidth, 320), 120) }
 
     var body: some View {
         if let song = player.current {
@@ -11,7 +14,8 @@ struct NowPlayingHeader: View {
                 Artwork(urls: model.client.imageURLs(for: song, size: 800))
                     .overlay { coverControls }
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .frame(maxWidth: 320)
+                    // Fixed square size so the list below can't squeeze the cover.
+                    .frame(width: coverSide, height: coverSide)
                     .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
 
                 VStack(spacing: 4) {
@@ -28,6 +32,8 @@ struct NowPlayingHeader: View {
 
                 PlaybackScrubber()
             }
+            .frame(maxWidth: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
             .padding(.horizontal, 24)
             .padding(.top, 8)
             .padding(.bottom, 16)
