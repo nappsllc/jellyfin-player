@@ -185,11 +185,18 @@ final class AudioPlayer: ObservableObject {
 
     private func loadArtwork(for song: JFItem) {
         artworkTask?.cancel()
-        guard let url = client.imageURL(for: song, size: 600) else { return }
+        let urls = client.imageURLs(for: song, size: 600)
         artworkTask = Task { [weak self] in
-            guard let result = try? await URLSession.shared.data(from: url),
-                  let image = UIImage(data: result.0),
-                  !Task.isCancelled else { return }
+            var found: UIImage?
+            for url in urls {
+                if let result = try? await URLSession.shared.data(from: url),
+                   (result.1 as? HTTPURLResponse)?.statusCode == 200,
+                   let image = UIImage(data: result.0) {
+                    found = image
+                    break
+                }
+            }
+            guard let image = found, !Task.isCancelled else { return }
             guard let self, self.current?.id == song.id else { return }
             self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             self.updateNowPlaying()

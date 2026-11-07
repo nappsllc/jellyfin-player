@@ -44,6 +44,7 @@ struct JFItem: Decodable, Identifiable, Hashable {
     let runTimeTicks: Int64?
     let imageTags: [String: String]?
     let albumPrimaryImageTag: String?
+    let parentId: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -58,6 +59,7 @@ struct JFItem: Decodable, Identifiable, Hashable {
         case runTimeTicks = "RunTimeTicks"
         case imageTags = "ImageTags"
         case albumPrimaryImageTag = "AlbumPrimaryImageTag"
+        case parentId = "ParentId"
     }
 
     var artistLine: String {

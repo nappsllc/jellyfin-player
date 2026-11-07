@@ -35,7 +35,7 @@ struct FolderPickerView: View {
                         FolderPickerView(parent: folder)
                     } label: {
                         HStack(spacing: 12) {
-                            CoverArt(url: model.client.imageURL(for: folder, size: 100), size: 36, placeholder: "folder")
+                            CoverArt(urls: model.client.imageURLs(for: folder, size: 100), size: 36, placeholder: "folder")
                             Text(folder.name).lineLimit(1)
                             Spacer()
                             if model.folder?.id == folder.id {

@@ -8,7 +8,7 @@ struct NowPlayingHeader: View {
     var body: some View {
         if let song = player.current {
             VStack(spacing: 16) {
-                Artwork(url: model.client.imageURL(for: song, size: 800))
+                Artwork(urls: model.client.imageURLs(for: song, size: 800))
                     .overlay { coverControls }
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .frame(maxWidth: 320)
@@ -87,7 +87,7 @@ struct NowPlayingBar: View {
         if let song = player.current {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    CoverArt(url: model.client.imageURL(for: song, size: 200), size: 44)
+                    CoverArt(urls: model.client.imageURLs(for: song, size: 200), size: 44)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(song.name).font(.headline).lineLimit(1)
                         Text(song.artistLine).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
@@ -158,22 +158,12 @@ struct PlaybackScrubber: View {
 
 /// Square cover that scales to the width it is given.
 struct Artwork: View {
-    let url: URL?
+    let urls: [URL]
 
     var body: some View {
-        Color.secondary.opacity(0.15)
+        Color.clear
             .aspectRatio(1, contentMode: .fit)
-            .overlay {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 64))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            .overlay { FallbackImage(urls: urls, placeholderSize: 64) }
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }

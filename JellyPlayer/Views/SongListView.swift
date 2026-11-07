@@ -120,7 +120,7 @@ struct SongRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            CoverArt(url: model.client.imageURL(for: song, size: 150), size: 48)
+            CoverArt(urls: model.client.imageURLs(for: song, size: 150), size: 48)
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.name)
                     .fontWeight(isCurrent ? .semibold : .regular)
@@ -147,22 +147,49 @@ struct SongRow: View {
 }
 
 struct CoverArt: View {
-    let url: URL?
+    let urls: [URL]
     let size: CGFloat
     var placeholder = "music.note"
 
     var body: some View {
-        AsyncImage(url: url) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                ZStack {
-                    Color.secondary.opacity(0.15)
-                    Image(systemName: placeholder).foregroundStyle(.secondary)
+        FallbackImage(urls: urls, placeholder: placeholder)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.15, style: .continuous))
+    }
+}
+
+/// Tries each URL in turn until one loads, showing a placeholder icon meanwhile and if none do.
+struct FallbackImage: View {
+    let urls: [URL]
+    var placeholder = "music.note"
+    var placeholderSize: CGFloat? = nil
+    @State private var index = 0
+
+    var body: some View {
+        ZStack {
+            Color.secondary.opacity(0.15)
+            if index < urls.count {
+                AsyncImage(url: urls[index]) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        placeholderIcon.onAppear { index += 1 }
+                    default:
+                        placeholderIcon
+                    }
                 }
+                .id(urls[index])
+            } else {
+                placeholderIcon
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.15, style: .continuous))
+        .onChange(of: urls) { _, _ in index = 0 }
+    }
+
+    private var placeholderIcon: some View {
+        Image(systemName: placeholder)
+            .font(placeholderSize.map { .system(size: $0) } ?? .body)
+            .foregroundStyle(.secondary)
     }
 }

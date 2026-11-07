@@ -130,6 +130,7 @@ final class JellyfinClient {
                 URLQueryItem(name: "SortBy", value: "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName"),
                 URLQueryItem(name: "SortOrder", value: "Ascending"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary"),
+                URLQueryItem(name: "Fields", value: "ParentId"),
                 URLQueryItem(name: "StartIndex", value: String(all.count)),
                 URLQueryItem(name: "Limit", value: String(pageSize)),
             ])
@@ -173,26 +174,27 @@ final class JellyfinClient {
         return components?.url
     }
 
-    /// Cover art for a song (falls back to its album's cover) or a folder.
-    func imageURL(for item: JFItem, size: Int = 300) -> URL? {
-        guard let s = session else { return nil }
-        let id: String
-        let tag: String
-        if let t = item.imageTags?["Primary"] {
-            id = item.id; tag = t
-        } else if let albumId = item.albumId, let t = item.albumPrimaryImageTag {
-            id = albumId; tag = t
-        } else {
-            return nil
+    /// Cover art candidates, best first: the song's own image (embedded art), then its album's, then its folder's.
+    /// Image tags are used when the server sends them, but not required, because some servers (e.g. Remux) omit them.
+    func imageURLs(for item: JFItem, size: Int = 300) -> [URL] {
+        guard let s = session else { return [] }
+        var candidates: [(id: String, tag: String?)] = [(item.id, item.imageTags?["Primary"])]
+        if let albumId = item.albumId { candidates.append((albumId, item.albumPrimaryImageTag)) }
+        if let parentId = item.parentId { candidates.append((parentId, nil)) }
+
+        var seen = Set<String>()
+        return candidates.compactMap { candidate in
+            guard seen.insert(candidate.id).inserted else { return nil }
+            var components = URLComponents(url: s.serverURL.appending(path: "Items/\(candidate.id)/Images/Primary"), resolvingAgainstBaseURL: false)
+            var query = [
+                URLQueryItem(name: "maxWidth", value: String(size)),
+                URLQueryItem(name: "maxHeight", value: String(size)),
+                URLQueryItem(name: "quality", value: "90"),
+            ]
+            if let tag = candidate.tag { query.append(URLQueryItem(name: "tag", value: tag)) }
+            components?.queryItems = query
+            return components?.url
         }
-        var components = URLComponents(url: s.serverURL.appending(path: "Items/\(id)/Images/Primary"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "maxWidth", value: String(size)),
-            URLQueryItem(name: "maxHeight", value: String(size)),
-            URLQueryItem(name: "quality", value: "90"),
-            URLQueryItem(name: "tag", value: tag),
-        ]
-        return components?.url
     }
 
     // MARK: Plumbing
