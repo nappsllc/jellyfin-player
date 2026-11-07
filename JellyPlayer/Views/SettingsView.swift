@@ -68,6 +68,12 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("Save played songs on device", isOn: $model.cacheAudio)
+                    Picker("Keep up to", selection: $model.cacheLimitGB) {
+                        ForEach(Self.cacheLimits, id: \.self) { gb in
+                            Text(Self.limitLabel(gb)).tag(gb)
+                        }
+                    }
+                    .onChange(of: model.cacheLimitGB) { _, _ in cacheSize = model.cacheSize() }
                     LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file))
                     Button("Clear cache", role: .destructive) {
                         model.clearCache()
@@ -76,7 +82,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Storage")
                 } footer: {
-                    Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Up to 1 GB of music is kept; the oldest songs are removed first.")
+                    Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Once the limit is reached, the songs played longest ago are removed first.")
                 }
 
                 Section {
@@ -95,6 +101,12 @@ struct SettingsView: View {
         .onAppear {
             if server.isEmpty { server = model.lastServer }
         }
+    }
+
+    private static let cacheLimits: [Double] = [0.5, 1, 2, 5, 10, 20, 50]
+
+    private static func limitLabel(_ gb: Double) -> String {
+        gb < 1 ? "\(Int(gb * 1000)) MB" : "\(Int(gb)) GB"
     }
 
     private static var appVersion: String {
