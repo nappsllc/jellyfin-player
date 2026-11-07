@@ -53,8 +53,12 @@ final class AppModel: ObservableObject {
     @Published var cacheLimitGB: Double {
         didSet {
             defaults.set(cacheLimitGB, forKey: AudioCache.limitKey)
-            player.audioCache.evictIfNeeded()
         }
+    }
+
+    /// Removes the oldest-played songs until the cache fits the current limit.
+    func trimCache() {
+        player.audioCache.evictIfNeeded()
     }
 
     var lastServer: String { defaults.string(forKey: Keys.lastServer) ?? "" }
