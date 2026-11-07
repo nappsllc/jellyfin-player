@@ -68,7 +68,10 @@ struct JFItem: Codable, Identifiable, Hashable {
     }
 
     var subtitle: String {
-        if let album, !album.isEmpty { return "\(artistLine) · \(album)" }
+        // Skip the album when it just repeats the song title (common for singles).
+        if let album, !album.isEmpty, album.caseInsensitiveCompare(name) != .orderedSame {
+            return "\(artistLine) · \(album)"
+        }
         return artistLine
     }
 

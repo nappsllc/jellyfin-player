@@ -126,7 +126,7 @@ struct SongRow: View {
                     .fontWeight(isCurrent ? .semibold : .regular)
                     .foregroundStyle(isCurrent ? Color.accentColor : Color.primary)
                     .lineLimit(1)
-                Text(song.artistLine)
+                Text(song.subtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
