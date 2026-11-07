@@ -10,12 +10,20 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var duration: Double = 0
+    /// Set when playback fails, so the UI can show why.
+    @Published var errorMessage: String?
 
     private(set) var shuffleEnabled = false
     private var queue: [JFItem] = []
     private var originalOrder: [JFItem] = []
     private var index = 0
     private var consecutiveFailures = 0
+    private var lastFailure: String?
+    private var usingTranscode = false
+    let audioCache = AudioCache()
+    private var loader: DownloadingLoader?
+    /// Save played songs (and the next one in the queue) on the device.
+    var cacheAudio = true
 
     private let player = AVPlayer()
     private let client: JellyfinClient
@@ -125,18 +133,40 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: Loading
 
-    private func load(at i: Int, autoplay: Bool) {
-        guard queue.indices.contains(i), let url = client.streamURL(for: queue[i]) else { return }
+    private func load(at i: Int, autoplay: Bool, transcoded: Bool = false) {
+        guard queue.indices.contains(i) else { return }
+        let localFile = transcoded ? nil : audioCache.localFile(for: queue[i].id)
+        let url = localFile ?? (transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i]))
+        guard let url else { return }
+        usingTranscode = transcoded
         index = i
         let song = queue[i]
         current = song
         elapsed = 0
         duration = song.duration ?? 0
 
-        let item = AVPlayerItem(url: url)
+        loader?.cancel()
+        loader = nil
+        let asset: AVURLAsset
+        if localFile != nil {
+            asset = AVURLAsset(url: url)
+        } else if cacheAudio && !transcoded {
+            // Download the file once and play it as it arrives; it's saved to the device when complete.
+            let songId = song.id
+            let cache = audioCache
+            let newLoader = DownloadingLoader(remoteURL: url, headers: client.streamHeaders) { data, mimeType in
+                Task { @MainActor in cache.save(data, songId: songId, mimeType: mimeType) }
+            }
+            loader = newLoader
+            asset = newLoader.makeAsset()
+        } else {
+            asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": client.streamHeaders])
+        }
+        let item = AVPlayerItem(asset: asset)
         statusObservation = item.observe(\.status) { [weak self] item, _ in
             let status = item.status
-            Task { @MainActor in self?.itemStatusChanged(status) }
+            let error = item.error?.localizedDescription
+            Task { @MainActor in self?.itemStatusChanged(status, error: error) }
         }
         player.replaceCurrentItem(with: item)
         if autoplay { resume() }
@@ -146,22 +176,42 @@ final class AudioPlayer: ObservableObject {
         loadArtwork(for: song)
     }
 
-    private func itemStatusChanged(_ status: AVPlayerItem.Status) {
+    private func itemStatusChanged(_ status: AVPlayerItem.Status, error: String?) {
         switch status {
         case .readyToPlay:
             consecutiveFailures = 0
+            cacheCurrentAndNext()
         case .failed:
-            skipAfterFailure()
+            lastFailure = error
+            if !usingTranscode {
+                // The original file isn't playable on iOS; ask the server to transcode it.
+                load(at: index, autoplay: true, transcoded: true)
+            } else {
+                skipAfterFailure()
+            }
         default:
             break
         }
     }
 
+    /// Pre-loads the next song in the queue so it starts instantly. (The playing song saves itself as it downloads.)
+    private func cacheCurrentAndNext() {
+        guard queue.count > 1 else { return }
+        let nextSong = queue[(index + 1) % queue.count]
+        // Pre-load the next cover so it's ready the instant the track changes (for car stereos).
+        let nextCover = client.imageURLs(for: nextSong, size: 600)
+        Task { _ = await ImageCache.shared.image(for: nextCover) }
+        guard cacheAudio else { return }
+        guard let url = client.directStreamURL(for: nextSong) else { return }
+        audioCache.store(songId: nextSong.id, from: url, headers: client.streamHeaders)
+    }
+
     private func skipAfterFailure() {
         consecutiveFailures += 1
-        // Give up if every song in the queue failed (e.g. server unreachable).
-        guard consecutiveFailures < queue.count else {
+        // Stop after 3 failures in a row (e.g. server unreachable or stream rejected) and say why.
+        guard consecutiveFailures < min(3, queue.count) else {
             player.pause()
+            errorMessage = "Couldn't play songs from the server: \(lastFailure ?? "unknown error")"
             return
         }
         next()
@@ -169,14 +219,57 @@ final class AudioPlayer: ObservableObject {
 
     private func loadArtwork(for song: JFItem) {
         artworkTask?.cancel()
-        guard let url = client.imageURL(for: song, size: 600) else { return }
+        let urls = client.imageURLs(for: song, size: 600)
+        // Car stereos often read the cover only once, right when the track changes,
+        // so use an already-loaded cover immediately (the next song's is pre-loaded).
+        if let cached = ImageCache.shared.memoryImage(for: urls) {
+            artwork = Self.makeArtwork(cached)
+            updateNowPlaying()
+            return
+        }
+        // Smaller list thumbnails are often already on disk, which helps when offline.
+        let fallbackURLs = client.imageURLs(for: song, size: 150)
         artworkTask = Task { [weak self] in
-            guard let result = try? await URLSession.shared.data(from: url),
-                  let image = UIImage(data: result.0),
-                  !Task.isCancelled else { return }
-            guard let self, self.current?.id == song.id else { return }
-            self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-            self.updateNowPlaying()
+            // If the connection is down, keep retrying (10 s, 20 s, 40 s … up to 2 min apart) while this song plays.
+            var delay: UInt64 = 10
+            while !Task.isCancelled {
+                var image = await ImageCache.shared.image(for: urls)
+                if image == nil { image = await ImageCache.shared.image(for: fallbackURLs) }
+                if let image {
+                    guard let self, self.current?.id == song.id else { return }
+                    self.artwork = Self.makeArtwork(image)
+                    self.updateNowPlaying()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                delay = min(delay * 2, 120)
+                guard let self, self.current?.id == song.id else { return }
+            }
+        }
+    }
+
+    /// Lock screen / CarPlay / Bluetooth artwork. Some car stereos only show square JPEG-friendly images
+    /// of a modest size, so the cover is centre-cropped to a square and redrawn at the size requested.
+    private static func makeArtwork(_ image: UIImage) -> MPMediaItemArtwork {
+        let square = squareImage(image, side: 600)
+        return MPMediaItemArtwork(boundsSize: square.size) { requested in
+            let side = max(1, min(requested.width, requested.height))
+            return side >= square.size.width ? square : squareImage(square, side: side)
+        }
+    }
+
+    private nonisolated static func squareImage(_ image: UIImage, side: CGFloat) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            let size = image.size
+            let scale = max(side / max(size.width, 1), side / max(size.height, 1))
+            let drawn = CGSize(width: size.width * scale, height: size.height * scale)
+            UIColor.black.setFill()
+            UIRectFill(CGRect(x: 0, y: 0, width: side, height: side))
+            image.draw(in: CGRect(x: (side - drawn.width) / 2, y: (side - drawn.height) / 2,
+                                  width: drawn.width, height: drawn.height))
         }
     }
 
@@ -212,8 +305,10 @@ final class AudioPlayer: ObservableObject {
             forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil, queue: .main
         ) { [weak self] note in
             let item = note.object as? AVPlayerItem
+            let error = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription
             MainActor.assumeIsolated {
                 guard let self, item === self.player.currentItem else { return }
+                self.lastFailure = error
                 self.skipAfterFailure()
             }
         })

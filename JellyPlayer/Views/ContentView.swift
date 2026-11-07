@@ -34,9 +34,7 @@ struct ContentView: View {
                     .accessibilityLabel("Settings")
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                if player.current != nil { NowPlayingBar() }
-            }
+            .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(isPresented: $model.showSettings) {
             SettingsView()
@@ -44,12 +42,12 @@ struct ContentView: View {
                 .environmentObject(player)
         }
         .alert("Something went wrong", isPresented: Binding(
-            get: { model.errorMessage != nil },
-            set: { if !$0 { model.errorMessage = nil } }
+            get: { model.errorMessage != nil || player.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil; player.errorMessage = nil } }
         )) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(model.errorMessage ?? "")
+            Text(model.errorMessage ?? player.errorMessage ?? "")
         }
     }
 }

@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
         static let shuffle = "shuffle"
         static let folder = "folder"
         static let lastServer = "lastServer"
+        static let cacheAudio = "cacheAudio"
     }
 
     let client: JellyfinClient
@@ -41,6 +42,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @Published var cacheAudio: Bool {
+        didSet {
+            defaults.set(cacheAudio, forKey: Keys.cacheAudio)
+            player.cacheAudio = cacheAudio
+        }
+    }
+
     var lastServer: String { defaults.string(forKey: Keys.lastServer) ?? "" }
 
     private var started = false
@@ -52,6 +60,7 @@ final class AppModel: ObservableObject {
         player = AudioPlayer(client: client)
         autoPlay = defaults.object(forKey: Keys.autoPlay) as? Bool ?? true
         shuffle = defaults.bool(forKey: Keys.shuffle)
+        cacheAudio = defaults.object(forKey: Keys.cacheAudio) as? Bool ?? true
         if let data = defaults.data(forKey: Keys.folder) {
             folder = try? JSONDecoder().decode(FolderSelection.self, from: data)
         }
@@ -59,6 +68,7 @@ final class AppModel: ObservableObject {
         session = savedSession
         client.session = savedSession
         player.setShuffle(shuffle)
+        player.cacheAudio = cacheAudio
     }
 
     /// Called once when the app opens: load the folder and auto-play if that setting is on.
@@ -69,8 +79,15 @@ final class AppModel: ObservableObject {
             showSettings = true
             return
         }
-        await reload()
-        if autoPlay { player.play(songs: songs) }
+        // Show (and start playing) the saved list right away, then refresh it from the server.
+        if let folder, let cached = SongListCache.load(folderId: folder.id), !cached.isEmpty {
+            songs = cached
+            if autoPlay { player.play(songs: songs) }
+            await reload()
+        } else {
+            await reload()
+            if autoPlay { player.play(songs: songs) }
+        }
     }
 
     func reload() async {
@@ -78,9 +95,12 @@ final class AppModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            songs = try await client.songs(in: folder.id)
+            let fresh = try await client.songs(in: folder.id)
+            songs = fresh
+            SongListCache.save(fresh, folderId: folder.id)
         } catch {
-            errorMessage = error.localizedDescription
+            // Offline with a saved list: keep showing it quietly.
+            if songs.isEmpty { errorMessage = error.localizedDescription }
         }
     }
 
@@ -97,6 +117,17 @@ final class AppModel: ObservableObject {
         session = nil
         folder = nil
         songs = []
+    }
+
+    /// Bytes used by saved songs and covers.
+    func cacheSize() -> Int64 {
+        player.audioCache.diskSize + ImageCache.shared.diskSize
+    }
+
+    func clearCache() {
+        player.audioCache.clear()
+        ImageCache.shared.clear()
+        SongListCache.clear()
     }
 
     func selectFolder(_ item: JFItem) {

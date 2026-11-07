@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var password = ""
     @State private var isSigningIn = false
     @State private var signInError: String?
+    @State private var cacheSize: Int64 = 0
 
     var body: some View {
         NavigationStack {
@@ -64,7 +65,21 @@ struct SettingsView: View {
                 } footer: {
                     Text("With auto-play on, music starts as soon as the app opens.")
                 }
+
+                Section {
+                    Toggle("Save played songs on device", isOn: $model.cacheAudio)
+                    LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file))
+                    Button("Clear cache", role: .destructive) {
+                        model.clearCache()
+                        cacheSize = model.cacheSize()
+                    }
+                } header: {
+                    Text("Storage")
+                } footer: {
+                    Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Up to 1 GB of music is kept; the oldest songs are removed first.")
+                }
             }
+            .onAppear { cacheSize = model.cacheSize() }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

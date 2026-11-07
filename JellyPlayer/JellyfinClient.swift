@@ -56,6 +56,12 @@ final class JellyfinClient {
         return url
     }
 
+    /// Headers for AVPlayer requests, so the stream is authorized even if the server ignores query-string tokens.
+    var streamHeaders: [String: String] {
+        guard let token = session?.accessToken else { return [:] }
+        return ["Authorization": authorization(token: token), "X-Emby-Token": token]
+    }
+
     private func authorization(token: String?) -> String {
         var value = "MediaBrowser Client=\"\(Self.clientName)\", Device=\"iOS\", DeviceId=\"\(deviceId)\", Version=\"\(Self.clientVersion)\""
         if let token { value += ", Token=\"\(token)\"" }
@@ -124,6 +130,7 @@ final class JellyfinClient {
                 URLQueryItem(name: "SortBy", value: "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName"),
                 URLQueryItem(name: "SortOrder", value: "Ascending"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary"),
+                URLQueryItem(name: "Fields", value: "ParentId"),
                 URLQueryItem(name: "StartIndex", value: String(all.count)),
                 URLQueryItem(name: "Limit", value: String(pageSize)),
             ])
@@ -136,13 +143,27 @@ final class JellyfinClient {
 
     // MARK: URLs
 
-    /// Universal endpoint: the server direct-streams formats iOS can play and transcodes the rest to AAC over HLS.
-    func streamURL(for item: JFItem) -> URL? {
+    /// The original file, streamed as-is with byte-range support. iOS plays MP3, AAC/M4A, ALAC, FLAC and WAV
+    /// this way, and it avoids server-side HLS transcoding, which some servers (e.g. Remux) serve broken.
+    func directStreamURL(for item: JFItem) -> URL? {
+        guard let s = session else { return nil }
+        var components = URLComponents(url: s.serverURL.appending(path: "Audio/\(item.id)/stream"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "static", value: "true"),
+            URLQueryItem(name: "ApiKey", value: s.accessToken),
+            URLQueryItem(name: "api_key", value: s.accessToken),
+        ]
+        return components?.url
+    }
+
+    /// Fallback for formats iOS can't decode (e.g. Ogg, Opus, WMA): the server transcodes to AAC over HLS.
+    func transcodedStreamURL(for item: JFItem) -> URL? {
         guard let s = session else { return nil }
         var components = URLComponents(url: s.serverURL.appending(path: "Audio/\(item.id)/universal"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "UserId", value: s.userId),
             URLQueryItem(name: "DeviceId", value: deviceId),
+            URLQueryItem(name: "ApiKey", value: s.accessToken),
             URLQueryItem(name: "api_key", value: s.accessToken),
             URLQueryItem(name: "Container", value: "mp3,aac,m4a|aac,m4b|aac,flac,alac,m4a|alac,wav"),
             URLQueryItem(name: "TranscodingContainer", value: "ts"),
@@ -153,26 +174,27 @@ final class JellyfinClient {
         return components?.url
     }
 
-    /// Cover art for a song (falls back to its album's cover) or a folder.
-    func imageURL(for item: JFItem, size: Int = 300) -> URL? {
-        guard let s = session else { return nil }
-        let id: String
-        let tag: String
-        if let t = item.imageTags?["Primary"] {
-            id = item.id; tag = t
-        } else if let albumId = item.albumId, let t = item.albumPrimaryImageTag {
-            id = albumId; tag = t
-        } else {
-            return nil
+    /// Cover art candidates, best first: the song's own image (embedded art), then its album's, then its folder's.
+    /// Image tags are used when the server sends them, but not required, because some servers (e.g. Remux) omit them.
+    func imageURLs(for item: JFItem, size: Int = 300) -> [URL] {
+        guard let s = session else { return [] }
+        var candidates: [(id: String, tag: String?)] = [(item.id, item.imageTags?["Primary"])]
+        if let albumId = item.albumId { candidates.append((albumId, item.albumPrimaryImageTag)) }
+        if let parentId = item.parentId { candidates.append((parentId, nil)) }
+
+        var seen = Set<String>()
+        return candidates.compactMap { candidate in
+            guard seen.insert(candidate.id).inserted else { return nil }
+            var components = URLComponents(url: s.serverURL.appending(path: "Items/\(candidate.id)/Images/Primary"), resolvingAgainstBaseURL: false)
+            var query = [
+                URLQueryItem(name: "maxWidth", value: String(size)),
+                URLQueryItem(name: "maxHeight", value: String(size)),
+                URLQueryItem(name: "quality", value: "90"),
+            ]
+            if let tag = candidate.tag { query.append(URLQueryItem(name: "tag", value: tag)) }
+            components?.queryItems = query
+            return components?.url
         }
-        var components = URLComponents(url: s.serverURL.appending(path: "Items/\(id)/Images/Primary"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "maxWidth", value: String(size)),
-            URLQueryItem(name: "maxHeight", value: String(size)),
-            URLQueryItem(name: "quality", value: "90"),
-            URLQueryItem(name: "tag", value: tag),
-        ]
-        return components?.url
     }
 
     // MARK: Plumbing
