@@ -60,6 +60,8 @@ struct SongListView: View {
             if expanded && !isSearching {
                 NowPlayingHeader()
                     .frame(maxWidth: .infinity)
+                    // Full-size cover first; the list gets the space that's left.
+                    .layoutPriority(1)
                     .transition(.move(edge: .top).combined(with: .opacity))
             } else {
                 NowPlayingBar {
