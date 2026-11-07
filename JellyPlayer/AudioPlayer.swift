@@ -233,7 +233,9 @@ final class AudioPlayer: ObservableObject {
             // If the connection is down, keep retrying (10 s, 20 s, 40 s … up to 2 min apart) while this song plays.
             var delay: UInt64 = 10
             while !Task.isCancelled {
-                if let image = await ImageCache.shared.image(for: urls) ?? ImageCache.shared.image(for: fallbackURLs) {
+                var image = await ImageCache.shared.image(for: urls)
+                if image == nil { image = await ImageCache.shared.image(for: fallbackURLs) }
+                if let image {
                     guard let self, self.current?.id == song.id else { return }
                     self.artwork = Self.makeArtwork(image)
                     self.updateNowPlaying()
