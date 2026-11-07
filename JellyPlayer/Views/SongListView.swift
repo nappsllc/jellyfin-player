@@ -3,8 +3,11 @@ import SwiftUI
 struct SongListView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
-    @State private var headerCollapsed = false
+    @State private var expanded = true
+    @State private var lastOffset: CGFloat = 0
     @State private var query = ""
+    @State private var showSearch = false
+    @FocusState private var searchFocused: Bool
 
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -18,42 +21,81 @@ struct SongListView: View {
         }
     }
 
-    private static let headerID = "nowPlayingHeader"
     private static let scrollSpace = "songScroll"
-    /// The big tile counts as scrolled away once less than this much of it is still visible.
-    private static let collapseThreshold: CGFloat = 90
+    /// Scrolling the list this far down shrinks the big player to the mini bar.
+    private static let collapseDistance: CGFloat = 40
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if isSearching {
-                        EmptyView()
-                    } else if player.current != nil {
-                        NowPlayingHeader()
-                            .frame(maxWidth: .infinity)
-                            .id(Self.headerID)
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear.preference(
-                                        key: HeaderBottomKey.self,
-                                        value: geo.frame(in: .named(Self.scrollSpace)).maxY
-                                    )
-                                }
-                            )
-                        Divider()
-                    } else {
-                        startButtons
+        VStack(spacing: 0) {
+            if showSearch {
+                searchField
+            }
+            playerArea
+            songList
+        }
+        .onChange(of: player.current == nil) { _, stopped in
+            if stopped { expanded = true }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if showSearch { closeSearch() } else { showSearch = true }
                     }
+                    if showSearch { DispatchQueue.main.async { searchFocused = true } }
+                } label: {
+                    Image(systemName: showSearch ? "xmark" : "magnifyingglass")
+                }
+                .accessibilityLabel(showSearch ? "Close search" : "Search")
+            }
+        }
+    }
 
-                    Text(isSearching ? "\(visibleSongs.count) of \(model.songs.count) songs" : "\(model.songs.count) songs")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal)
-                        .padding(.top, 12)
-                        .padding(.bottom, 4)
+    /// The player sits above the list and never scrolls with it. Big tile, or the mini bar
+    /// once the list is scrolled or while searching. Tapping the mini bar opens the big tile
+    /// again without moving the list.
+    @ViewBuilder
+    private var playerArea: some View {
+        if player.current != nil {
+            if expanded && !isSearching {
+                NowPlayingHeader()
+                    .frame(maxWidth: .infinity)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                NowPlayingBar {
+                    searchFocused = false
+                    if isSearching { closeSearch() }
+                    withAnimation(.easeInOut(duration: 0.25)) { expanded = true }
+                }
+            }
+            Divider()
+        } else {
+            startButtons
+        }
+    }
 
-                    LazyVStack(alignment: .leading, spacing: 0) {
+    private var songList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear
+                    .frame(height: 0)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ListOffsetKey.self,
+                                value: -geo.frame(in: .named(Self.scrollSpace)).minY
+                            )
+                        }
+                    )
+
+                Text(isSearching ? "\(visibleSongs.count) of \(model.songs.count) songs" : "\(model.songs.count) songs")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if isSearching && visibleSongs.isEmpty {
                         Text("No songs match “\(query)”")
                             .foregroundStyle(.secondary)
@@ -73,36 +115,54 @@ struct SongListView: View {
                         .buttonStyle(.plain)
                         Divider().padding(.leading, 76)
                     }
-                    }
                 }
             }
-            .coordinateSpace(name: Self.scrollSpace)
-            .onPreferenceChange(HeaderBottomKey.self) { bottom in
-                let collapsed = bottom < Self.collapseThreshold
-                if collapsed != headerCollapsed {
-                    withAnimation(.easeInOut(duration: 0.2)) { headerCollapsed = collapsed }
-                }
-            }
-            .onChange(of: player.current == nil) { _, stopped in
-                if stopped { headerCollapsed = false }
-            }
-            .overlay(alignment: .top) {
-                if (headerCollapsed || isSearching) && player.current != nil {
-                    NowPlayingBar {
-                        query = ""
-                        DispatchQueue.main.async {
-                            withAnimation(.easeInOut(duration: 0.35)) {
-                                proxy.scrollTo(Self.headerID, anchor: .top)
-                            }
-                        }
-                    }
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .refreshable { await model.reload() }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Title or artist")
-            .autocorrectionDisabled()
         }
+        .coordinateSpace(name: Self.scrollSpace)
+        .scrollDismissesKeyboard(.immediately)
+        .onPreferenceChange(ListOffsetKey.self) { offset in
+            // Only a real scroll down shrinks it, not the list resizing when the tile opens.
+            let scrolledDown = offset > lastOffset + 2
+            lastOffset = offset
+            if expanded && scrolledDown && offset > Self.collapseDistance {
+                withAnimation(.easeInOut(duration: 0.25)) { expanded = false }
+            }
+        }
+        .refreshable { await model.reload() }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Title or artist", text: $query)
+                .focused($searchFocused)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+                .onSubmit { searchFocused = false }
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    private func closeSearch() {
+        query = ""
+        searchFocused = false
+        showSearch = false
     }
 
     /// Shown when nothing is playing yet (e.g. auto-play is off).
@@ -131,10 +191,10 @@ struct SongListView: View {
     }
 }
 
-private struct HeaderBottomKey: PreferenceKey {
-    static var defaultValue: CGFloat = .greatestFiniteMagnitude
+private struct ListOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = min(value, nextValue())
+        value = nextValue()
     }
 }
 

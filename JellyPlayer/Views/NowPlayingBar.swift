@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Large "now playing" tile shown at the top of the song list: cover, title, scrubber and controls.
+/// Large "now playing" tile shown above the song list: cover, title, scrubber and controls.
 struct NowPlayingHeader: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
@@ -77,7 +77,7 @@ struct NowPlayingHeader: View {
     }
 }
 
-/// Compact one-line player pinned to the top once the big tile scrolls away. Tap it to expand again.
+/// Compact one-line player shown above the list once it is scrolled or while searching. Tap it to expand again.
 struct NowPlayingBar: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
