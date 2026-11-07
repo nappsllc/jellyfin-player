@@ -78,6 +78,10 @@ struct SettingsView: View {
                 } footer: {
                     Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Up to 1 GB of music is kept; the oldest songs are removed first.")
                 }
+
+                Section {
+                    LabeledContent("Version", value: Self.appVersion)
+                }
             }
             .onAppear { cacheSize = model.cacheSize() }
             .navigationTitle("Settings")
@@ -91,6 +95,13 @@ struct SettingsView: View {
         .onAppear {
             if server.isEmpty { server = model.lastServer }
         }
+    }
+
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(version) (\(build))"
     }
 
     private func signIn() async {
