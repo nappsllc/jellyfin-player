@@ -196,8 +196,12 @@ final class AudioPlayer: ObservableObject {
 
     /// Pre-loads the next song in the queue so it starts instantly. (The playing song saves itself as it downloads.)
     private func cacheCurrentAndNext() {
-        guard cacheAudio, queue.count > 1 else { return }
+        guard queue.count > 1 else { return }
         let nextSong = queue[(index + 1) % queue.count]
+        // Pre-load the next cover so it's ready the instant the track changes (for car stereos).
+        let nextCover = client.imageURLs(for: nextSong, size: 600)
+        Task { _ = await ImageCache.shared.image(for: nextCover) }
+        guard cacheAudio else { return }
         guard let url = client.directStreamURL(for: nextSong) else { return }
         audioCache.store(songId: nextSong.id, from: url, headers: client.streamHeaders)
     }
@@ -216,12 +220,44 @@ final class AudioPlayer: ObservableObject {
     private func loadArtwork(for song: JFItem) {
         artworkTask?.cancel()
         let urls = client.imageURLs(for: song, size: 600)
+        // Car stereos often read the cover only once, right when the track changes,
+        // so use an already-loaded cover immediately (the next song's is pre-loaded).
+        if let cached = ImageCache.shared.memoryImage(for: urls) {
+            artwork = Self.makeArtwork(cached)
+            updateNowPlaying()
+            return
+        }
         artworkTask = Task { [weak self] in
             let found = await ImageCache.shared.image(for: urls)
             guard let image = found, !Task.isCancelled else { return }
             guard let self, self.current?.id == song.id else { return }
-            self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            self.artwork = Self.makeArtwork(image)
             self.updateNowPlaying()
+        }
+    }
+
+    /// Lock screen / CarPlay / Bluetooth artwork. Some car stereos only show square JPEG-friendly images
+    /// of a modest size, so the cover is centre-cropped to a square and redrawn at the size requested.
+    private static func makeArtwork(_ image: UIImage) -> MPMediaItemArtwork {
+        let square = squareImage(image, side: 600)
+        return MPMediaItemArtwork(boundsSize: square.size) { requested in
+            let side = max(1, min(requested.width, requested.height))
+            return side >= square.size.width ? square : squareImage(square, side: side)
+        }
+    }
+
+    private nonisolated static func squareImage(_ image: UIImage, side: CGFloat) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            let size = image.size
+            let scale = max(side / max(size.width, 1), side / max(size.height, 1))
+            let drawn = CGSize(width: size.width * scale, height: size.height * scale)
+            UIColor.black.setFill()
+            UIRectFill(CGRect(x: 0, y: 0, width: side, height: side))
+            image.draw(in: CGRect(x: (side - drawn.width) / 2, y: (side - drawn.height) / 2,
+                                  width: drawn.width, height: drawn.height))
         }
     }
 
