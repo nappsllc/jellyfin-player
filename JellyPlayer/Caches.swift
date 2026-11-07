@@ -68,8 +68,10 @@ final class ImageCache: @unchecked Sendable {
         }
 
         guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
-        guard (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: data) else {
-            lock.withLock { missing[url] = Date() }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200, let image = UIImage(data: data) else {
+            // Only a clear "not found" counts as no image; anything else (e.g. a flaky connection) is retried.
+            if status == 404 { lock.withLock { missing[url] = Date() } }
             return nil
         }
         try? data.write(to: file, options: .atomic)

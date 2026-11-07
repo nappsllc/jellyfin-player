@@ -182,8 +182,16 @@ struct FallbackImage: View {
                 return
             }
             image = nil
-            let loaded = await ImageCache.shared.image(for: urls)
-            if !Task.isCancelled { image = loaded }
+            // Retry while on screen, in case the connection dropped (10 s, 20 s, 40 s … up to 2 min apart).
+            var delay: UInt64 = 10
+            while !Task.isCancelled {
+                if let loaded = await ImageCache.shared.image(for: urls) {
+                    image = loaded
+                    return
+                }
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                delay = min(delay * 2, 120)
+            }
         }
     }
 }

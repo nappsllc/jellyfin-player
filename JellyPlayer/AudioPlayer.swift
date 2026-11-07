@@ -227,12 +227,22 @@ final class AudioPlayer: ObservableObject {
             updateNowPlaying()
             return
         }
+        // Smaller list thumbnails are often already on disk, which helps when offline.
+        let fallbackURLs = client.imageURLs(for: song, size: 150)
         artworkTask = Task { [weak self] in
-            let found = await ImageCache.shared.image(for: urls)
-            guard let image = found, !Task.isCancelled else { return }
-            guard let self, self.current?.id == song.id else { return }
-            self.artwork = Self.makeArtwork(image)
-            self.updateNowPlaying()
+            // If the connection is down, keep retrying (10 s, 20 s, 40 s … up to 2 min apart) while this song plays.
+            var delay: UInt64 = 10
+            while !Task.isCancelled {
+                if let image = await ImageCache.shared.image(for: urls) ?? ImageCache.shared.image(for: fallbackURLs) {
+                    guard let self, self.current?.id == song.id else { return }
+                    self.artwork = Self.makeArtwork(image)
+                    self.updateNowPlaying()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                delay = min(delay * 2, 120)
+                guard let self, self.current?.id == song.id else { return }
+            }
         }
     }
 
