@@ -158,38 +158,32 @@ struct CoverArt: View {
     }
 }
 
-/// Tries each URL in turn until one loads, showing a placeholder icon meanwhile and if none do.
+/// Tries each URL in turn until one has an image. Loads only when the view is on screen and caches on the device.
 struct FallbackImage: View {
     let urls: [URL]
     var placeholder = "music.note"
     var placeholderSize: CGFloat? = nil
-    @State private var index = 0
+    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
             Color.secondary.opacity(0.15)
-            if index < urls.count {
-                AsyncImage(url: urls[index]) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .failure:
-                        placeholderIcon.onAppear { index += 1 }
-                    default:
-                        placeholderIcon
-                    }
-                }
-                .id(urls[index])
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
             } else {
-                placeholderIcon
+                Image(systemName: placeholder)
+                    .font(placeholderSize.map { .system(size: $0) } ?? .body)
+                    .foregroundStyle(.secondary)
             }
         }
-        .onChange(of: urls) { _, _ in index = 0 }
-    }
-
-    private var placeholderIcon: some View {
-        Image(systemName: placeholder)
-            .font(placeholderSize.map { .system(size: $0) } ?? .body)
-            .foregroundStyle(.secondary)
+        .task(id: urls) {
+            if let cached = ImageCache.shared.memoryImage(for: urls) {
+                image = cached
+                return
+            }
+            image = nil
+            let loaded = await ImageCache.shared.image(for: urls)
+            if !Task.isCancelled { image = loaded }
+        }
     }
 }

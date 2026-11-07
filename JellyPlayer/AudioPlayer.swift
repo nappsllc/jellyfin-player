@@ -20,6 +20,9 @@ final class AudioPlayer: ObservableObject {
     private var consecutiveFailures = 0
     private var lastFailure: String?
     private var usingTranscode = false
+    let audioCache = AudioCache()
+    /// Save played songs (and the next one in the queue) on the device.
+    var cacheAudio = true
 
     private let player = AVPlayer()
     private let client: JellyfinClient
@@ -131,7 +134,8 @@ final class AudioPlayer: ObservableObject {
 
     private func load(at i: Int, autoplay: Bool, transcoded: Bool = false) {
         guard queue.indices.contains(i) else { return }
-        let url = transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i])
+        let localFile = transcoded ? nil : audioCache.localFile(for: queue[i].id)
+        let url = localFile ?? (transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i]))
         guard let url else { return }
         usingTranscode = transcoded
         index = i
@@ -140,7 +144,9 @@ final class AudioPlayer: ObservableObject {
         elapsed = 0
         duration = song.duration ?? 0
 
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": client.streamHeaders])
+        let asset = localFile != nil
+            ? AVURLAsset(url: url)
+            : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": client.streamHeaders])
         let item = AVPlayerItem(asset: asset)
         statusObservation = item.observe(\.status) { [weak self] item, _ in
             let status = item.status
@@ -159,6 +165,7 @@ final class AudioPlayer: ObservableObject {
         switch status {
         case .readyToPlay:
             consecutiveFailures = 0
+            cacheCurrentAndNext()
         case .failed:
             lastFailure = error
             if !usingTranscode {
@@ -169,6 +176,17 @@ final class AudioPlayer: ObservableObject {
             }
         default:
             break
+        }
+    }
+
+    /// Lazily saves the playing song and pre-loads the next one, so it starts instantly.
+    private func cacheCurrentAndNext() {
+        guard cacheAudio, !queue.isEmpty else { return }
+        var songs = [queue[index]]
+        if queue.count > 1 { songs.append(queue[(index + 1) % queue.count]) }
+        for song in songs {
+            guard let url = client.directStreamURL(for: song) else { continue }
+            audioCache.store(songId: song.id, from: url, headers: client.streamHeaders)
         }
     }
 
@@ -187,15 +205,7 @@ final class AudioPlayer: ObservableObject {
         artworkTask?.cancel()
         let urls = client.imageURLs(for: song, size: 600)
         artworkTask = Task { [weak self] in
-            var found: UIImage?
-            for url in urls {
-                if let result = try? await URLSession.shared.data(from: url),
-                   (result.1 as? HTTPURLResponse)?.statusCode == 200,
-                   let image = UIImage(data: result.0) {
-                    found = image
-                    break
-                }
-            }
+            let found = await ImageCache.shared.image(for: urls)
             guard let image = found, !Task.isCancelled else { return }
             guard let self, self.current?.id == song.id else { return }
             self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }

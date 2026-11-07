@@ -31,7 +31,7 @@ struct JFItemsResponse: Decodable {
 }
 
 /// A Jellyfin item (library, folder, album or song). Only the fields this app uses.
-struct JFItem: Decodable, Identifiable, Hashable {
+struct JFItem: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let type: String?
