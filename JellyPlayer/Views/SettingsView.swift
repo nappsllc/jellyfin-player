@@ -68,12 +68,21 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("Save played songs on device", isOn: $model.cacheAudio)
-                    Picker("Keep up to", selection: $model.cacheLimitGB) {
-                        ForEach(Self.cacheLimits, id: \.self) { gb in
-                            Text(Self.limitLabel(gb)).tag(gb)
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledContent("Keep up to", value: Self.limitLabel(model.cacheLimitGB))
+                        Slider(value: $model.cacheLimitGB, in: 0...100, step: 1) {
+                            Text("Keep up to")
+                        } minimumValueLabel: {
+                            Text("0")
+                        } maximumValueLabel: {
+                            Text("100 GB")
+                        } onEditingChanged: { editing in
+                            // Trim only once the slider is let go, not while dragging past small values.
+                            guard !editing else { return }
+                            model.trimCache()
+                            cacheSize = model.cacheSize()
                         }
                     }
-                    .onChange(of: model.cacheLimitGB) { _, _ in cacheSize = model.cacheSize() }
                     LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file))
                     Button("Clear cache", role: .destructive) {
                         model.clearCache()
@@ -103,10 +112,8 @@ struct SettingsView: View {
         }
     }
 
-    private static let cacheLimits: [Double] = [0.5, 1, 2, 5, 10, 20, 50]
-
     private static func limitLabel(_ gb: Double) -> String {
-        gb < 1 ? "\(Int(gb * 1000)) MB" : "\(Int(gb)) GB"
+        gb <= 0 ? "Nothing" : gb < 1 ? "\(Int(gb * 1000)) MB" : "\(Int(gb.rounded())) GB"
     }
 
     private static var appVersion: String {
