@@ -27,7 +27,9 @@ final class ImageCache: @unchecked Sendable {
     private let memory = NSCache<NSURL, UIImage>()
     private let directory = cachesDirectory("covers")
     private let lock = NSLock()
-    private var missing = Set<URL>()
+    /// URLs that had no image, with when we tried. Retried after a while, because some servers fetch art on demand.
+    private var missing: [URL: Date] = [:]
+    private static let retryAfter: TimeInterval = 120
 
     private init() {
         memory.countLimit = 400
@@ -67,7 +69,7 @@ final class ImageCache: @unchecked Sendable {
 
         guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
         guard (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: data) else {
-            lock.withLock { _ = missing.insert(url) }
+            lock.withLock { missing[url] = Date() }
             return nil
         }
         try? data.write(to: file, options: .atomic)
@@ -76,7 +78,14 @@ final class ImageCache: @unchecked Sendable {
     }
 
     private func isMissing(_ url: URL) -> Bool {
-        lock.withLock { missing.contains(url) }
+        lock.withLock {
+            guard let since = missing[url] else { return false }
+            if Date().timeIntervalSince(since) > Self.retryAfter {
+                missing[url] = nil
+                return false
+            }
+            return true
+        }
     }
 
     var diskSize: Int64 { directorySize(directory) }
