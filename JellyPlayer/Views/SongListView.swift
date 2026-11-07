@@ -5,6 +5,8 @@ struct SongListView: View {
     @EnvironmentObject private var player: AudioPlayer
     @State private var expanded = true
     @State private var lastOffset: CGFloat = 0
+    /// List offset when the big player was last opened.
+    @State private var expandedAt: CGFloat = 0
     @State private var query = ""
     @State private var showSearch = false
     @FocusState private var searchFocused: Bool
@@ -34,7 +36,7 @@ struct SongListView: View {
             songList
         }
         .onChange(of: player.current == nil) { _, stopped in
-            if stopped { expanded = true }
+            if stopped { expanded = true; expandedAt = lastOffset }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -67,6 +69,7 @@ struct SongListView: View {
                 NowPlayingBar {
                     searchFocused = false
                     if isSearching { closeSearch() }
+                    expandedAt = lastOffset
                     withAnimation(.easeInOut(duration: 0.25)) { expanded = true }
                 }
             }
@@ -122,15 +125,19 @@ struct SongListView: View {
         }
         .coordinateSpace(name: Self.scrollSpace)
         .scrollDismissesKeyboard(.immediately)
-        .onPreferenceChange(ListOffsetKey.self) { offset in
-            // Only a real scroll down shrinks it, not the list resizing when the tile opens.
-            let scrolledDown = offset > lastOffset + 2
-            lastOffset = offset
-            if expanded && scrolledDown && offset > Self.collapseDistance {
-                withAnimation(.easeInOut(duration: 0.25)) { expanded = false }
-            }
-        }
+        .modifier(ScrollOffsetReader { listScrolled(to: $0) })
         .refreshable { await model.reload() }
+    }
+
+    private func listScrolled(to offset: CGFloat) {
+        lastOffset = offset
+        guard expanded else { return }
+        // Shrink once the list has moved down a bit from where it was when the big player opened.
+        // Measuring from that point (not from the top) keeps the list where you left it.
+        expandedAt = min(expandedAt, max(offset, 0))
+        if offset > expandedAt + Self.collapseDistance {
+            withAnimation(.easeInOut(duration: 0.25)) { expanded = false }
+        }
     }
 
     private var searchField: some View {
@@ -190,6 +197,24 @@ struct SongListView: View {
         }
         .controlSize(.large)
         .padding()
+    }
+}
+
+/// Reports how far the list is scrolled. Uses the scroll view's own geometry on iOS 18+,
+/// where marker-view preferences inside a ScrollView aren't reliably delivered while scrolling.
+private struct ScrollOffsetReader: ViewModifier {
+    let onChange: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, offset in
+                onChange(offset)
+            }
+        } else {
+            content.onPreferenceChange(ListOffsetKey.self) { onChange($0) }
+        }
     }
 }
 
