@@ -21,6 +21,15 @@ Needs a Mac with Xcode 16 or newer and iOS 17+ on the device.
 3. Pick your iPhone or a simulator and press Run.
 4. On first launch Settings opens: enter the server URL (e.g. `http://192.168.1.10:8096`), username and password, then choose a folder.
 
+## Install and auto-update with SideStore (recommended)
+
+Every push to `main` publishes a GitHub release with `JellyPlayer.ipa` and a SideStore/AltStore source feed.
+
+1. Install SideStore on the iPhone, e.g. with [iloader](https://github.com/nab138/iloader) ("SideStore (Stable)"), and install LocalDevVPN from the App Store.
+2. In SideStore → **Sources** → **+**, add:
+   `https://github.com/nappsllc/jellyfin-player/releases/latest/download/apps.json`
+3. Install JellyPlayer from that source. SideStore refreshes it every 7 days on the phone and offers new versions as updates.
+
 ## Install from Windows (no Mac, no paid account)
 
 Every push to `main` builds an unsigned `JellyPlayer.ipa` on GitHub's Mac runners.
