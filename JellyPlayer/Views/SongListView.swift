@@ -4,6 +4,19 @@ struct SongListView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
     @State private var headerCollapsed = false
+    @State private var query = ""
+
+    private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Songs matching every word of the search in the title, artist or album.
+    private var visibleSongs: [JFItem] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return model.songs }
+        return model.songs.filter { song in
+            let haystack = "\(song.name) \(song.artistLine) \(song.album ?? "")"
+            return words.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        }
+    }
 
     private static let headerID = "nowPlayingHeader"
     private static let scrollSpace = "songScroll"
@@ -14,7 +27,9 @@ struct SongListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if player.current != nil {
+                    if isSearching {
+                        EmptyView()
+                    } else if player.current != nil {
                         NowPlayingHeader()
                             .frame(maxWidth: .infinity)
                             .id(Self.headerID)
@@ -31,7 +46,7 @@ struct SongListView: View {
                         startButtons
                     }
 
-                    Text("\(model.songs.count) songs")
+                    Text(isSearching ? "\(visibleSongs.count) of \(model.songs.count) songs" : "\(model.songs.count) songs")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal)
@@ -39,7 +54,13 @@ struct SongListView: View {
                         .padding(.bottom, 4)
 
                     LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(model.songs) { song in
+                    if isSearching && visibleSongs.isEmpty {
+                        Text("No songs match “\(query)”")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                    }
+                    ForEach(visibleSongs) { song in
                         Button {
                             player.play(songs: model.songs, startAt: song)
                         } label: {
@@ -66,16 +87,21 @@ struct SongListView: View {
                 if stopped { headerCollapsed = false }
             }
             .overlay(alignment: .top) {
-                if headerCollapsed && player.current != nil {
+                if (headerCollapsed || isSearching) && player.current != nil {
                     NowPlayingBar {
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            proxy.scrollTo(Self.headerID, anchor: .top)
+                        query = ""
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                proxy.scrollTo(Self.headerID, anchor: .top)
+                            }
                         }
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             .refreshable { await model.reload() }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Title or artist")
+            .autocorrectionDisabled()
         }
     }
 
