@@ -86,23 +86,34 @@ struct SongListView: View {
             .onChange(of: player.current == nil) { _, stopped in
                 if stopped { headerCollapsed = false }
             }
+            // While scrolling, the mini player floats over the list (no jump when it appears).
             .overlay(alignment: .top) {
-                if (headerCollapsed || isSearching) && player.current != nil {
-                    NowPlayingBar {
-                        query = ""
-                        DispatchQueue.main.async {
-                            withAnimation(.easeInOut(duration: 0.35)) {
-                                proxy.scrollTo(Self.headerID, anchor: .top)
-                            }
-                        }
-                    }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                if headerCollapsed && !isSearching && player.current != nil {
+                    miniPlayer(proxy)
+                }
+            }
+            // While searching, it takes its own space so the first result isn't hidden under it.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if isSearching && player.current != nil {
+                    miniPlayer(proxy)
                 }
             }
             .refreshable { await model.reload() }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Title or artist")
             .autocorrectionDisabled()
         }
+    }
+
+    private func miniPlayer(_ proxy: ScrollViewProxy) -> some View {
+        NowPlayingBar {
+            query = ""
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(Self.headerID, anchor: .top)
+                }
+            }
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     /// Shown when nothing is playing yet (e.g. auto-play is off).
