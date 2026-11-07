@@ -49,6 +49,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Music cache limit in GB.
+    @Published var cacheLimitGB: Double {
+        didSet {
+            defaults.set(cacheLimitGB, forKey: AudioCache.limitKey)
+            player.audioCache.evictIfNeeded()
+        }
+    }
+
     var lastServer: String { defaults.string(forKey: Keys.lastServer) ?? "" }
 
     private var started = false
@@ -61,6 +69,7 @@ final class AppModel: ObservableObject {
         autoPlay = defaults.object(forKey: Keys.autoPlay) as? Bool ?? true
         shuffle = defaults.bool(forKey: Keys.shuffle)
         cacheAudio = defaults.object(forKey: Keys.cacheAudio) as? Bool ?? true
+        cacheLimitGB = defaults.object(forKey: AudioCache.limitKey) as? Double ?? AudioCache.defaultLimitGB
         if let data = defaults.data(forKey: Keys.folder) {
             folder = try? JSONDecoder().decode(FolderSelection.self, from: data)
         }

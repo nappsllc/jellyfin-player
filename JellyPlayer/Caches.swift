@@ -106,7 +106,14 @@ final class ImageCache: @unchecked Sendable {
 /// Least recently played files are removed once the cache passes `maxBytes`.
 @MainActor
 final class AudioCache {
-    static let maxBytes: Int64 = 1_000_000_000
+    static let limitKey = "cacheLimitGB"
+    static let defaultLimitGB = 1.0
+
+    /// Size limit chosen in Settings (1 GB unless changed).
+    static var maxBytes: Int64 {
+        let gb = UserDefaults.standard.object(forKey: limitKey) as? Double ?? defaultLimitGB
+        return Int64(gb * 1_000_000_000)
+    }
 
     private let directory = cachesDirectory("audio")
     private var inFlight = Set<String>()
@@ -159,7 +166,8 @@ final class AudioCache {
         evictIfNeeded()
     }
 
-    private func evictIfNeeded() {
+    /// Removes the least recently played songs until the cache fits the limit.
+    func evictIfNeeded() {
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         var files = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys)) ?? [])
             .map { url -> (url: URL, size: Int64, date: Date) in
