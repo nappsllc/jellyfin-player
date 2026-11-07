@@ -27,7 +27,7 @@ struct ContentView: View {
             }
             .navigationTitle(model.folder?.name ?? "JellyPlayer")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button { model.showSettings = true } label: {
                         Image(systemName: "gearshape")
                     }

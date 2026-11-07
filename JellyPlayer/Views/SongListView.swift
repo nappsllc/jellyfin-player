@@ -5,6 +5,8 @@ struct SongListView: View {
     @EnvironmentObject private var player: AudioPlayer
     @State private var headerCollapsed = false
     @State private var query = ""
+    @State private var showSearch = false
+    @FocusState private var searchFocused: Bool
 
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -92,21 +94,73 @@ struct SongListView: View {
                     miniPlayer(proxy)
                 }
             }
-            // While searching, it takes its own space so the first result isn't hidden under it.
+            // The search field and, while searching, the mini player take their own space at the top
+            // so the first result isn't hidden under them.
             .safeAreaInset(edge: .top, spacing: 0) {
-                if isSearching && player.current != nil {
-                    miniPlayer(proxy)
+                VStack(spacing: 0) {
+                    if showSearch {
+                        searchField
+                    }
+                    if isSearching && player.current != nil {
+                        miniPlayer(proxy)
+                    }
                 }
             }
             .refreshable { await model.reload() }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Title or artist")
-            .autocorrectionDisabled()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if showSearch { closeSearch() } else { showSearch = true }
+                        }
+                        if showSearch { DispatchQueue.main.async { searchFocused = true } }
+                    } label: {
+                        Image(systemName: showSearch ? "xmark" : "magnifyingglass")
+                    }
+                    .accessibilityLabel(showSearch ? "Close search" : "Search")
+                }
+            }
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Title or artist", text: $query)
+                .focused($searchFocused)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+                .onSubmit { searchFocused = false }
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private func closeSearch() {
+        query = ""
+        searchFocused = false
+        showSearch = false
     }
 
     private func miniPlayer(_ proxy: ScrollViewProxy) -> some View {
         NowPlayingBar {
-            query = ""
+            closeSearch()
             DispatchQueue.main.async {
                 withAnimation(.easeInOut(duration: 0.35)) {
                     proxy.scrollTo(Self.headerID, anchor: .top)
