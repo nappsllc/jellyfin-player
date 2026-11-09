@@ -2,37 +2,16 @@ import SwiftUI
 
 /// Large "now playing" tile shown above the song list: cover, title, scrubber and controls.
 struct NowPlayingHeader: View {
-    @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
-    /// Largest cover size; smaller in landscape so the whole tile fits the screen height.
-    var maxCoverSide: CGFloat = 320
     @State private var availableWidth: CGFloat = 320
 
-    private var coverSide: CGFloat { max(min(availableWidth, maxCoverSide), 120) }
+    private var coverSide: CGFloat { max(min(availableWidth, 320), 120) }
 
     var body: some View {
-        if let song = player.current {
+        if player.current != nil {
             VStack(spacing: 16) {
-                Artwork(urls: model.client.imageURLs(for: song, size: 600))
-                    .overlay { coverControls }
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    // Fixed square size so the list below can't squeeze the cover.
-                    .frame(width: coverSide, height: coverSide)
-                    .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
-
-                VStack(spacing: 4) {
-                    Text(song.name)
-                        .font(.title3.bold())
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                    Text(song.subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                }
-
-                PlaybackScrubber()
+                NowPlayingCover(side: coverSide)
+                NowPlayingInfo(alignment: .center)
             }
             .frame(maxWidth: .infinity)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
@@ -41,25 +20,73 @@ struct NowPlayingHeader: View {
             .padding(.bottom, 16)
         }
     }
+}
 
-    /// Previous / play-pause / next drawn over the cover on a soft dark scrim, with shuffle in the corner.
-    private var coverControls: some View {
+/// Title, artist and the playback bar for the current song.
+struct NowPlayingInfo: View {
+    @EnvironmentObject private var player: AudioPlayer
+    var alignment: HorizontalAlignment = .center
+
+    var body: some View {
+        if let song = player.current {
+            VStack(alignment: alignment, spacing: 12) {
+                VStack(alignment: alignment, spacing: 4) {
+                    Text(song.name)
+                        .font(.title3.bold())
+                        .lineLimit(2)
+                    Text(song.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .multilineTextAlignment(alignment == .center ? .center : .leading)
+                .frame(maxWidth: .infinity, alignment: alignment == .center ? .center : .leading)
+
+                PlaybackScrubber()
+            }
+        }
+    }
+}
+
+/// The square cover with previous / play-pause / next drawn over it, sized to `side`.
+/// The controls scale with the cover so they always fit inside it.
+struct NowPlayingCover: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var player: AudioPlayer
+    let side: CGFloat
+
+    var body: some View {
+        if let song = player.current {
+            Artwork(urls: model.client.imageURLs(for: song, size: 600))
+                .overlay { controls }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                // Fixed square size so nothing around it can squeeze the cover.
+                .frame(width: side, height: side)
+                .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+        }
+    }
+
+    /// Sizes for a 320 pt cover, scaled to the actual one.
+    private var scale: CGFloat { min(max(side / 320, 0.55), 1.3) }
+
+    /// Previous / play-pause / next on a soft dark scrim, with shuffle in the corner.
+    private var controls: some View {
         ZStack {
             Color.black.opacity(0.28)
 
-            HStack(spacing: 44) {
+            HStack(spacing: 44 * scale) {
                 Button { player.previous() } label: {
-                    Image(systemName: "backward.fill").font(.system(size: 30))
+                    Image(systemName: "backward.fill").font(.system(size: 30 * scale))
                 }
                 .accessibilityLabel("Previous")
                 Button { player.togglePlayPause() } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 52))
-                        .frame(width: 64, height: 64)
+                        .font(.system(size: 52 * scale))
+                        .frame(width: 64 * scale, height: 64 * scale)
                 }
                 .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
                 Button { player.next() } label: {
-                    Image(systemName: "forward.fill").font(.system(size: 30))
+                    Image(systemName: "forward.fill").font(.system(size: 30 * scale))
                 }
                 .accessibilityLabel("Next")
             }
@@ -70,14 +97,14 @@ struct NowPlayingHeader: View {
                     Spacer()
                     Button { model.shuffle.toggle() } label: {
                         Image(systemName: "shuffle")
-                            .font(.system(size: 18, weight: .semibold))
-                            .padding(10)
+                            .font(.system(size: 18 * scale, weight: .semibold))
+                            .padding(10 * scale)
                             .background(model.shuffle ? Color.accentColor : Color.black.opacity(0.35), in: Circle())
                     }
                     .accessibilityLabel(model.shuffle ? "Shuffle on" : "Shuffle off")
                 }
             }
-            .padding(12)
+            .padding(12 * scale)
         }
         .foregroundStyle(.white)
         .shadow(color: .black.opacity(0.4), radius: 4)
