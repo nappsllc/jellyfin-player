@@ -278,6 +278,15 @@ struct FallbackImage: View {
     var placeholderSize: CGFloat? = nil
     @State private var image: UIImage?
 
+    init(urls: [URL], placeholder: String = "music.note", placeholderSize: CGFloat? = nil) {
+        self.urls = urls
+        self.placeholder = placeholder
+        self.placeholderSize = placeholderSize
+        // Start with an already-loaded cover so it appears in the same frame (and animation) as the
+        // rest of the view, instead of popping in a moment later.
+        _image = State(initialValue: ImageCache.shared.memoryImage(for: urls))
+    }
+
     var body: some View {
         ZStack {
             Color.secondary.opacity(0.15)
