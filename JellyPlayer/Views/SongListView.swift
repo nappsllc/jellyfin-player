@@ -34,24 +34,7 @@ struct SongListView: View {
     var body: some View {
         Group {
             if isLandscape {
-                HStack(spacing: 0) {
-                    GeometryReader { geo in
-                        ScrollView {
-                            // Cover sized so title, controls and scrubber fit beside it without scrolling.
-                            NowPlayingHeader(maxCoverSide: max(geo.size.height - 150, 120))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .scrollBounceBehavior(.basedOnSize)
-                    }
-                    .frame(maxWidth: 380)
-                    Divider()
-                    VStack(spacing: 0) {
-                        if showSearch {
-                            searchField
-                        }
-                        songList
-                    }
-                }
+                landscapeLayout
             } else {
                 VStack(spacing: 0) {
                     if showSearch {
@@ -62,6 +45,8 @@ struct SongListView: View {
                 }
             }
         }
+        // Sideways the navigation bar's title and buttons move into the list column, so the cover can use the full height.
+        .toolbar(isLandscape ? .hidden : .automatic, for: .navigationBar)
         .onChange(of: player.current == nil) { _, stopped in
             if stopped { expanded = true; expandedAt = lastOffset }
         }
@@ -78,6 +63,66 @@ struct SongListView: View {
                 .accessibilityLabel(showSearch ? "Close search" : "Search")
             }
         }
+    }
+
+    /// iPhone held sideways: the cover with its controls fills the screen height on the left; title, playback bar,
+    /// the folder name with search and settings, and the list fill the rest of the width.
+    private var landscapeLayout: some View {
+        GeometryReader { geo in
+            let insets = geo.safeAreaInsets
+            // Stay clear of the camera cut-out on either side, but no more than needed.
+            let leading = max(12, insets.leading - 8)
+            let trailing = max(0, insets.trailing - 16)
+            let side = max(min(geo.size.height - insets.bottom - 24, geo.size.width * 0.5), 120)
+            HStack(spacing: 0) {
+                NowPlayingCover(side: side)
+                    .padding(.leading, leading)
+                    .padding(.trailing, 16)
+                    .padding(.top, 12)
+                    .frame(maxHeight: .infinity, alignment: .top)
+
+                VStack(spacing: 0) {
+                    landscapeTopBar
+                    if showSearch {
+                        searchField
+                    }
+                    NowPlayingInfo(alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                    Divider()
+                    songList
+                        .contentMargins(.bottom, insets.bottom, for: .scrollContent)
+                }
+                .padding(.trailing, trailing)
+            }
+        }
+        .ignoresSafeArea(.container, edges: [.top, .horizontal, .bottom])
+    }
+
+    private var landscapeTopBar: some View {
+        HStack(spacing: 20) {
+            Text(model.folder?.name ?? "JellyPlayer")
+                .font(.headline)
+                .lineLimit(1)
+            Spacer()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if showSearch { closeSearch() } else { showSearch = true }
+                }
+                if showSearch { DispatchQueue.main.async { searchFocused = true } }
+            } label: {
+                Image(systemName: showSearch ? "xmark" : "magnifyingglass")
+            }
+            .accessibilityLabel(showSearch ? "Close search" : "Search")
+            Button { model.showSettings = true } label: {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Settings")
+        }
+        .font(.title3)
+        .padding(.horizontal)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
     }
 
     /// The player sits above the list and never scrolls with it. Big tile, or the mini bar
