@@ -70,30 +70,36 @@ struct SongListView: View {
     private var landscapeLayout: some View {
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
-            // Stay clear of the camera cut-out on either side, but no more than needed.
-            let leading = max(12, insets.leading - 8)
-            let trailing = max(0, insets.trailing - 16)
-            let side = max(min(geo.size.height - insets.bottom - 24, geo.size.width * 0.5), 120)
+            // Same margin on every side as the portrait layout's side margins.
+            let margin: CGFloat = 24
+            let scrubberHeight: CGFloat = 46
+            let spacing: CGFloat = 12
+            let side = max(min(geo.size.height - 2 * margin - scrubberHeight - spacing, geo.size.width * 0.5), 120)
             HStack(spacing: 0) {
-                NowPlayingCover(side: side)
-                    .padding(.leading, leading)
-                    .padding(.trailing, 16)
-                    .padding(.top, 12)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                // Cover with the playback bar under it.
+                VStack(spacing: spacing) {
+                    NowPlayingCover(side: side)
+                    PlaybackScrubber()
+                        .frame(width: side)
+                }
+                .padding(margin)
+                .frame(maxHeight: .infinity, alignment: .center)
 
                 VStack(spacing: 0) {
                     landscapeTopBar
                     if showSearch {
                         searchField
                     }
-                    NowPlayingInfo(alignment: .leading)
+                    NowPlayingInfo(alignment: .leading, showsScrubber: false)
                         .padding(.horizontal)
                         .padding(.bottom, 8)
                     Divider()
                     songList
                         .contentMargins(.bottom, insets.bottom, for: .scrollContent)
                 }
-                .padding(.trailing, trailing)
+                // Rows already have 16 pt inside, so this ends them `margin` from the screen edge.
+                .padding(.trailing, margin - 16)
+                .padding(.top, margin - 10)
             }
         }
         .ignoresSafeArea(.container, edges: [.top, .horizontal, .bottom])
@@ -120,7 +126,9 @@ struct SongListView: View {
             .accessibilityLabel("Settings")
         }
         .font(.title3)
-        .padding(.horizontal)
+        .padding(.leading)
+        // Extra room on the right so the gear stays clear of the screen's rounded corner.
+        .padding(.trailing, 28)
         .padding(.top, 10)
         .padding(.bottom, 6)
     }
