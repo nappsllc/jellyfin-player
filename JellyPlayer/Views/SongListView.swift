@@ -82,7 +82,10 @@ struct SongListView: View {
                     PlaybackScrubber()
                         .frame(width: side)
                 }
-                .padding(margin)
+                .padding(.vertical, margin)
+                .padding(.trailing, margin)
+                // Keep the cover clear of the Dynamic Island when it's on the left.
+                .padding(.leading, max(margin, insets.leading))
                 .frame(maxHeight: .infinity, alignment: .center)
 
                 VStack(spacing: 0) {
@@ -98,7 +101,8 @@ struct SongListView: View {
                         .contentMargins(.bottom, insets.bottom, for: .scrollContent)
                 }
                 // Rows already have 16 pt inside, so this ends them `margin` from the screen edge.
-                .padding(.trailing, margin - 16)
+                // …and the list clear of it when it's on the right.
+                .padding(.trailing, max(margin, insets.trailing) - 16)
                 .padding(.top, margin - 10)
             }
         }
