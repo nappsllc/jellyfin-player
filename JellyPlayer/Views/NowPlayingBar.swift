@@ -27,6 +27,7 @@ struct NowPlayingInfo: View {
     @EnvironmentObject private var player: AudioPlayer
     var alignment: HorizontalAlignment = .center
     var showsScrubber = true
+    var titleLines = 2
 
     var body: some View {
         if let song = player.current {
@@ -34,7 +35,7 @@ struct NowPlayingInfo: View {
                 VStack(alignment: alignment, spacing: 4) {
                     Text(song.name)
                         .font(.title3.bold())
-                        .lineLimit(2)
+                        .lineLimit(titleLines)
                     Text(song.subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
