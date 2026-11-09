@@ -10,6 +10,10 @@ struct SongListView: View {
     @State private var query = ""
     @State private var showSearch = false
     @FocusState private var searchFocused: Bool
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    /// iPhone held sideways: big player on the left, list on the right.
+    private var isLandscape: Bool { verticalSizeClass == .compact && player.current != nil }
 
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -28,12 +32,35 @@ struct SongListView: View {
     private static let collapseDistance: CGFloat = 40
 
     var body: some View {
-        VStack(spacing: 0) {
-            if showSearch {
-                searchField
+        Group {
+            if isLandscape {
+                HStack(spacing: 0) {
+                    GeometryReader { geo in
+                        ScrollView {
+                            // Cover sized so title, controls and scrubber fit beside it without scrolling.
+                            NowPlayingHeader(maxCoverSide: max(geo.size.height - 150, 120))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                    }
+                    .frame(maxWidth: 380)
+                    Divider()
+                    VStack(spacing: 0) {
+                        if showSearch {
+                            searchField
+                        }
+                        songList
+                    }
+                }
+            } else {
+                VStack(spacing: 0) {
+                    if showSearch {
+                        searchField
+                    }
+                    playerArea
+                    songList
+                }
             }
-            playerArea
-            songList
         }
         .onChange(of: player.current == nil) { _, stopped in
             if stopped { expanded = true; expandedAt = lastOffset }

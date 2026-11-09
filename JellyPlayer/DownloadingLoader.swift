@@ -23,6 +23,18 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
     private var retries = 0
     private var pending: [AVAssetResourceLoadingRequest] = []
 
+    private let progressLock = NSLock()
+    private var downloadedFraction: Double = 0
+    /// How much of the song has been downloaded, from 0 to 1. Safe to read from any thread.
+    var progress: Double {
+        progressLock.lock(); defer { progressLock.unlock() }
+        return downloadedFraction
+    }
+
+    private func setProgress(_ value: Double) {
+        progressLock.lock(); downloadedFraction = value; progressLock.unlock()
+    }
+
     init(remoteURL: URL, headers: [String: String], onComplete: @escaping @Sendable (Data, String) -> Void) {
         self.remoteURL = remoteURL
         self.headers = headers
@@ -103,6 +115,7 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
         data.append(chunk)
+        if totalLength > 0 { setProgress(min(1, Double(data.count) / Double(totalLength))) }
         processPending()
     }
 
@@ -127,6 +140,7 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
             return
         }
         finished = true
+        setProgress(1)
         session.finishTasksAndInvalidate()
         processPending()
         onComplete(data, mimeType)

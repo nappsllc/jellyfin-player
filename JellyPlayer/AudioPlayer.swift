@@ -10,6 +10,8 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var duration: Double = 0
+    /// How much of the current song is on the device or buffered, from 0 to 1 (like YouTube's grey bar).
+    @Published private(set) var loaded: Double = 0
     /// Set when playback fails, so the UI can show why.
     @Published var errorMessage: String?
 
@@ -20,6 +22,7 @@ final class AudioPlayer: ObservableObject {
     private var consecutiveFailures = 0
     private var lastFailure: String?
     private var usingTranscode = false
+    private var playingLocalFile = false
     let audioCache = AudioCache()
     private var loader: DownloadingLoader?
     /// Save played songs (and the next one in the queue) on the device.
@@ -147,6 +150,8 @@ final class AudioPlayer: ObservableObject {
 
         loader?.cancel()
         loader = nil
+        playingLocalFile = localFile != nil
+        loaded = playingLocalFile ? 1 : 0
         let asset: AVURLAsset
         if localFile != nil {
             asset = AVURLAsset(url: url)
@@ -350,11 +355,28 @@ final class AudioPlayer: ObservableObject {
     private func tick(_ time: CMTime) {
         let seconds = time.seconds
         if seconds.isFinite { elapsed = seconds }
+        updateLoaded()
         if let itemDuration = player.currentItem?.duration.seconds,
            itemDuration.isFinite, itemDuration > 0, abs(itemDuration - duration) > 0.5 {
             duration = itemDuration
             updateNowPlaying()
         }
+    }
+
+    private func updateLoaded() {
+        let value: Double
+        if playingLocalFile {
+            value = 1
+        } else if let loader {
+            value = loader.progress
+        } else if let item = player.currentItem, duration > 0 {
+            // Streaming without saving: use what AVPlayer has buffered ahead.
+            let end = item.loadedTimeRanges.map { CMTimeRangeGetEnd($0.timeRangeValue).seconds }.max() ?? 0
+            value = min(1, max(0, end / duration))
+        } else {
+            value = 0
+        }
+        if abs(value - loaded) > 0.002 { loaded = value }
     }
 
     // MARK: System integration
