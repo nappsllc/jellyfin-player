@@ -26,6 +26,7 @@ struct NowPlayingHeader: View {
 struct NowPlayingInfo: View {
     @EnvironmentObject private var player: AudioPlayer
     var alignment: HorizontalAlignment = .center
+    var showsScrubber = true
 
     var body: some View {
         if let song = player.current {
@@ -42,7 +43,9 @@ struct NowPlayingInfo: View {
                 .multilineTextAlignment(alignment == .center ? .center : .leading)
                 .frame(maxWidth: .infinity, alignment: alignment == .center ? .center : .leading)
 
-                PlaybackScrubber()
+                if showsScrubber {
+                    PlaybackScrubber()
+                }
             }
         }
     }
