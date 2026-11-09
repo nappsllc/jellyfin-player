@@ -171,8 +171,8 @@ final class AudioPlayer: ObservableObject {
         player.replaceCurrentItem(with: item)
         if autoplay { resume() }
 
-        artwork = nil
-        updateNowPlaying()
+        // Publish the new track together with its cover when it's ready, so the car never
+        // sees the new title without artwork first.
         loadArtwork(for: song)
     }
 
@@ -227,6 +227,8 @@ final class AudioPlayer: ObservableObject {
             updateNowPlaying()
             return
         }
+        artwork = nil
+        updateNowPlaying()
         // Smaller list thumbnails are often already on disk, which helps when offline.
         let fallbackURLs = client.imageURLs(for: song, size: 150)
         artworkTask = Task { [weak self] in
@@ -248,14 +250,12 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    /// Lock screen / CarPlay / Bluetooth artwork. Some car stereos only show square JPEG-friendly images
-    /// of a modest size, so the cover is centre-cropped to a square and redrawn at the size requested.
-    private static func makeArtwork(_ image: UIImage) -> MPMediaItemArtwork {
+    /// Lock screen / CarPlay / Bluetooth artwork: the cover centre-cropped to a 600 px square, drawn once.
+    /// The system calls the handler on a background thread, so it only hands back the finished image
+    /// (as the first builds did, when car covers worked) and isn't tied to the main actor.
+    private nonisolated static func makeArtwork(_ image: UIImage) -> MPMediaItemArtwork {
         let square = squareImage(image, side: 600)
-        return MPMediaItemArtwork(boundsSize: square.size) { requested in
-            let side = max(1, min(requested.width, requested.height))
-            return side >= square.size.width ? square : squareImage(square, side: side)
-        }
+        return MPMediaItemArtwork(boundsSize: square.size) { _ in square }
     }
 
     private nonisolated static func squareImage(_ image: UIImage, side: CGFloat) -> UIImage {
