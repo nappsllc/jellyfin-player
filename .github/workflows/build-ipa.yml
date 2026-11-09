@@ -52,7 +52,7 @@ jobs:
       # Add this URL as a source in SideStore to get updates:
       #   https://github.com/<owner>/<repo>/releases/latest/download/apps.json
       - name: Write SideStore source
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           REPO: ${{ github.repository }}
           NOTES: ${{ github.event.head_commit.message }}
@@ -67,7 +67,7 @@ jobs:
           cat apps.json
 
       - name: Publish release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           NOTES: ${{ github.event.head_commit.message }}
