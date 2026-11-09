@@ -74,15 +74,21 @@ struct SongListView: View {
             let margin: CGFloat = 24
             let scrubberHeight: CGFloat = 46
             let spacing: CGFloat = 12
-            let side = max(min(geo.size.height - 2 * margin - scrubberHeight - spacing, geo.size.width * 0.5), 120)
+            let titleHeight: CGFloat = 46
+            let side = max(min(geo.size.height - 2 * margin - titleHeight - scrubberHeight - 2 * spacing, geo.size.width * 0.5), 120)
             HStack(spacing: 0) {
-                // Cover with the playback bar under it.
+                // Cover, then title and artist, then the playback bar.
                 VStack(spacing: spacing) {
                     NowPlayingCover(side: side)
+                    NowPlayingInfo(alignment: .leading, showsScrubber: false, titleLines: 1)
+                        .frame(width: side)
                     PlaybackScrubber()
                         .frame(width: side)
                 }
-                .padding(margin)
+                .padding(.vertical, margin)
+                .padding(.trailing, margin)
+                // Keep the cover clear of the Dynamic Island when it's on the left.
+                .padding(.leading, max(margin, insets.leading))
                 .frame(maxHeight: .infinity, alignment: .center)
 
                 VStack(spacing: 0) {
@@ -90,15 +96,13 @@ struct SongListView: View {
                     if showSearch {
                         searchField
                     }
-                    NowPlayingInfo(alignment: .leading, showsScrubber: false)
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
                     Divider()
                     songList
                         .contentMargins(.bottom, insets.bottom, for: .scrollContent)
                 }
                 // Rows already have 16 pt inside, so this ends them `margin` from the screen edge.
-                .padding(.trailing, margin - 16)
+                // …and the list clear of it when it's on the right.
+                .padding(.trailing, max(margin, insets.trailing) - 16)
                 .padding(.top, margin - 10)
             }
         }
