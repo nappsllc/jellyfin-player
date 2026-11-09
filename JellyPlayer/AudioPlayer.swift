@@ -169,11 +169,10 @@ final class AudioPlayer: ObservableObject {
             Task { @MainActor in self?.itemStatusChanged(status, error: error) }
         }
         player.replaceCurrentItem(with: item)
-        if autoplay { resume() }
 
-        // Publish the new track together with its cover when it's ready, so the car never
-        // sees the new title without artwork first.
-        loadArtwork(for: song)
+        // Get the cover first, then announce the track and start playing, so the car receives
+        // the title and cover together (many head units read the cover only once per track).
+        loadArtwork(for: song, thenPlay: autoplay)
     }
 
     private func itemStatusChanged(_ status: AVPlayerItem.Status, error: String?) {
@@ -217,36 +216,59 @@ final class AudioPlayer: ObservableObject {
         next()
     }
 
-    private func loadArtwork(for song: JFItem) {
+    private func loadArtwork(for song: JFItem, thenPlay: Bool) {
         artworkTask?.cancel()
         let urls = client.imageURLs(for: song, size: 600)
-        // Car stereos often read the cover only once, right when the track changes,
-        // so use an already-loaded cover immediately (the next song's is pre-loaded).
+        // Smaller list thumbnails are often already on disk, which helps when offline.
+        let fallbackURLs = client.imageURLs(for: song, size: 150)
+        // The next song's cover is pre-loaded, so it's usually ready right away.
         if let cached = ImageCache.shared.memoryImage(for: urls) {
             artwork = Self.makeArtwork(cached)
             updateNowPlaying()
+            if thenPlay { resume() }
             return
         }
         artwork = nil
-        updateNowPlaying()
-        // Smaller list thumbnails are often already on disk, which helps when offline.
-        let fallbackURLs = client.imageURLs(for: song, size: 150)
         artworkTask = Task { [weak self] in
+            // Wait up to 3 s for the cover, then start playing either way.
+            let first = await Self.firstCover(urls, fallbackURLs, timeout: 3)
+            guard !Task.isCancelled, let self, self.current?.id == song.id else { return }
+            if let first { self.artwork = Self.makeArtwork(first) }
+            self.updateNowPlaying()
+            if thenPlay { self.resume() }
+            guard first == nil else { return }
+
             // If the connection is down, keep retrying (10 s, 20 s, 40 s … up to 2 min apart) while this song plays.
             var delay: UInt64 = 10
             while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                delay = min(delay * 2, 120)
                 var image = await ImageCache.shared.image(for: urls)
                 if image == nil { image = await ImageCache.shared.image(for: fallbackURLs) }
+                guard !Task.isCancelled, self.current?.id == song.id else { return }
                 if let image {
-                    guard let self, self.current?.id == song.id else { return }
                     self.artwork = Self.makeArtwork(image)
                     self.updateNowPlaying()
                     return
                 }
-                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
-                delay = min(delay * 2, 120)
-                guard let self, self.current?.id == song.id else { return }
             }
+        }
+    }
+
+    /// The song's cover (or its small fallback), or nil if it doesn't arrive within `timeout` seconds.
+    private nonisolated static func firstCover(_ urls: [URL], _ fallbackURLs: [URL], timeout: Double) async -> UIImage? {
+        await withTaskGroup(of: UIImage?.self) { group in
+            group.addTask {
+                if let image = await ImageCache.shared.image(for: urls) { return image }
+                return await ImageCache.shared.image(for: fallbackURLs)
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
         }
     }
 
