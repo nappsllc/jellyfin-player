@@ -4,9 +4,11 @@ import SwiftUI
 struct NowPlayingHeader: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var player: AudioPlayer
+    /// Largest cover size; smaller in landscape so the whole tile fits the screen height.
+    var maxCoverSide: CGFloat = 320
     @State private var availableWidth: CGFloat = 320
 
-    private var coverSide: CGFloat { max(min(availableWidth, 320), 120) }
+    private var coverSide: CGFloat { max(min(availableWidth, maxCoverSide), 120) }
 
     var body: some View {
         if let song = player.current {
@@ -116,9 +118,17 @@ struct NowPlayingBar: View {
                 .padding(.horizontal)
                 .padding(.vertical, 8)
 
-                ProgressView(value: player.duration > 0 ? min(player.elapsed / player.duration, 1) : 0)
-                    .progressViewStyle(.linear)
-                    .tint(.accentColor)
+                GeometryReader { geo in
+                    let played = player.duration > 0 ? min(player.elapsed / player.duration, 1) : 0
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color.secondary.opacity(0.2))
+                        Rectangle().fill(Color.accentColor.opacity(0.3))
+                            .frame(width: geo.size.width * CGFloat(max(player.loaded, played)))
+                        Rectangle().fill(Color.accentColor)
+                            .frame(width: geo.size.width * CGFloat(played))
+                    }
+                }
+                .frame(height: 3)
             }
             .background(.regularMaterial)
             .contentShape(Rectangle())
@@ -134,30 +144,78 @@ struct PlaybackScrubber: View {
     @EnvironmentObject private var player: AudioPlayer
     @State private var scrubPosition: Double?
 
+    private var total: Double { max(player.duration, 1) }
+    private var position: Double { min(scrubPosition ?? player.elapsed, total) }
+
     var body: some View {
-        VStack(spacing: 2) {
-            Slider(
-                value: Binding(
-                    get: { min(scrubPosition ?? player.elapsed, max(player.duration, 1)) },
-                    set: { scrubPosition = $0 }
-                ),
-                in: 0...max(player.duration, 1),
-                onEditingChanged: { editing in
-                    if !editing, let position = scrubPosition {
-                        player.seek(to: position)
-                        scrubPosition = nil
-                    }
+        VStack(spacing: 6) {
+            ProgressTrack(played: position / total, loaded: player.loaded, active: scrubPosition != nil)
+                .frame(height: 24)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard player.duration > 0 else { return }
+                            scrubPosition = fraction(at: value.location.x) * total
+                        }
+                        .onEnded { value in
+                            guard player.duration > 0 else { return }
+                            player.seek(to: fraction(at: value.location.x) * total)
+                            scrubPosition = nil
+                        }
+                )
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+                .accessibilityElement()
+                .accessibilityLabel("Playback position")
+                .accessibilityValue("\(formatTime(position)) of \(formatTime(player.duration))")
+                .accessibilityAdjustableAction { direction in
+                    let step: Double = direction == .increment ? 10 : -10
+                    player.seek(to: min(max(player.elapsed + step, 0), total))
                 }
-            )
-            .disabled(player.duration <= 0)
             HStack {
-                Text(formatTime(scrubPosition ?? player.elapsed))
+                Text(formatTime(position))
                 Spacer()
                 Text(formatTime(player.duration))
             }
             .font(.caption)
             .monospacedDigit()
             .foregroundStyle(.secondary)
+        }
+    }
+
+    @State private var width: CGFloat = 1
+
+    private func fraction(at x: CGFloat) -> Double {
+        Double(min(max(x / max(width, 1), 0), 1))
+    }
+}
+
+/// YouTube-style bar: grey track, a soft purple part for what's already downloaded, solid purple for what's played.
+struct ProgressTrack: View {
+    let played: Double
+    let loaded: Double
+    var active = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let barHeight: CGFloat = active ? 8 : 5
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.2))
+                Capsule().fill(Color.accentColor.opacity(0.3))
+                    .frame(width: w * CGFloat(min(max(loaded, played), 1)))
+                Capsule().fill(Color.accentColor)
+                    .frame(width: w * CGFloat(min(max(played, 0), 1)))
+            }
+            .frame(height: barHeight)
+            .overlay(alignment: .leading) {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: active ? 18 : 12, height: active ? 18 : 12)
+                    .offset(x: w * CGFloat(min(max(played, 0), 1)) - (active ? 9 : 6))
+            }
+            .frame(maxHeight: .infinity)
+            .animation(.easeOut(duration: 0.15), value: active)
         }
     }
 }
