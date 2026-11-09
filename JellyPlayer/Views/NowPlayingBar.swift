@@ -11,7 +11,7 @@ struct NowPlayingHeader: View {
     var body: some View {
         if let song = player.current {
             VStack(spacing: 16) {
-                Artwork(urls: model.client.imageURLs(for: song, size: 800))
+                Artwork(urls: model.client.imageURLs(for: song, size: 600))
                     .overlay { coverControls }
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     // Fixed square size so the list below can't squeeze the cover.
@@ -93,7 +93,7 @@ struct NowPlayingBar: View {
         if let song = player.current {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    CoverArt(urls: model.client.imageURLs(for: song, size: 200), size: 44)
+                    CoverArt(urls: model.client.imageURLs(for: song, size: 600), size: 44)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(song.name).font(.headline).lineLimit(1)
                         Text(song.artistLine).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
