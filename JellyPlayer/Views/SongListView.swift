@@ -95,7 +95,8 @@ struct SongListView: View {
                 .padding(.vertical, margin)
                 .padding(.trailing, margin)
                 .padding(.leading, leading)
-                .frame(maxHeight: .infinity, alignment: .center)
+                // Pinned to the top so the cover's top edge lines up with the folder name and icons.
+                .frame(maxHeight: .infinity, alignment: .top)
 
                 VStack(spacing: 0) {
                     landscapeTopBar
