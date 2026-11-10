@@ -27,27 +27,89 @@ struct NowPlayingInfo: View {
     @EnvironmentObject private var player: AudioPlayer
     var alignment: HorizontalAlignment = .center
     var showsScrubber = true
-    var titleLines = 2
 
     var body: some View {
         if let song = player.current {
             VStack(alignment: alignment, spacing: 12) {
                 VStack(alignment: alignment, spacing: 4) {
-                    Text(song.name)
-                        .font(.title3.bold())
-                        .lineLimit(titleLines)
-                    Text(song.subtitle)
-                        .font(.subheadline)
+                    MarqueeText(text: song.name, font: .title3.bold(), alignment: alignment)
+                    MarqueeText(text: song.subtitle, font: .subheadline, alignment: alignment)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
-                .multilineTextAlignment(alignment == .center ? .center : .leading)
                 .frame(maxWidth: .infinity, alignment: alignment == .center ? .center : .leading)
 
                 if showsScrubber {
                     PlaybackScrubber()
                 }
             }
+        }
+    }
+}
+
+/// One line of text that, when too long to fit, slides slowly to show its end,
+/// pauses, then slides back, over and over. Short text just sits still.
+struct MarqueeText: View {
+    let text: String
+    let font: Font
+    var alignment: HorizontalAlignment = .center
+
+    @State private var textWidth: CGFloat = 0
+    @State private var boxWidth: CGFloat = 0
+    @State private var offset: CGFloat = 0
+
+    private var overflow: CGFloat { max(textWidth - boxWidth, 0) }
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .hidden()
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: overflow > 0 ? .leading : Alignment(horizontal: alignment, vertical: .center)) {
+                Text(text)
+                    .font(font)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .background(GeometryReader { g in
+                        Color.clear.onAppear { textWidth = g.size.width }
+                            .onChange(of: g.size.width) { _, w in textWidth = w }
+                    })
+                    .offset(x: offset)
+            }
+            .background(GeometryReader { g in
+                Color.clear.onAppear { boxWidth = g.size.width }
+                    .onChange(of: g.size.width) { _, w in boxWidth = w }
+            })
+            .clipped()
+            // Soft fade at the edges while sliding so cut-off letters don't look chopped.
+            .mask {
+                if overflow > 0 {
+                    LinearGradient(stops: [.init(color: .clear, location: 0),
+                                           .init(color: .black, location: 0.04),
+                                           .init(color: .black, location: 0.96),
+                                           .init(color: .clear, location: 1)],
+                                   startPoint: .leading, endPoint: .trailing)
+                } else {
+                    Rectangle()
+                }
+            }
+            .accessibilityElement()
+            .accessibilityLabel(text)
+            .task(id: "\(text)|\(overflow)") { await slide() }
+    }
+
+    private func slide() async {
+        offset = 0
+        guard overflow > 0 else { return }
+        let duration = max(Double(overflow) / 30, 1)   // ~30 pt per second
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            if Task.isCancelled { return }
+            withAnimation(.linear(duration: duration)) { offset = -overflow }
+            try? await Task.sleep(for: .seconds(duration + 1.5))
+            if Task.isCancelled { return }
+            withAnimation(.linear(duration: duration)) { offset = 0 }
+            try? await Task.sleep(for: .seconds(duration))
         }
     }
 }
