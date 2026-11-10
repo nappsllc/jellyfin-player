@@ -68,14 +68,21 @@ struct SongListView: View {
     /// iPhone held sideways: the cover with its controls fills the screen height on the left; title, playback bar,
     /// the folder name with search and settings, and the list fill the rest of the width.
     private var landscapeLayout: some View {
+        // Read the safe area (camera cut-out, home indicator) here, then lay out over the whole screen.
+        // A reader that itself ignores the safe area reports zero insets, which put the cover under the island.
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
+            let fullHeight = geo.size.height + insets.top + insets.bottom
             // Same margin on every side as the portrait layout's side margins.
             let margin: CGFloat = 24
+            // The Dynamic Island ends about 11 pt inside the safe-area edge; keep the same gap after it.
+            let leading = insets.leading > 0 ? insets.leading - 11 + margin : margin
+            let trailing = insets.trailing > 0 ? insets.trailing - 11 + margin : margin
             let scrubberHeight: CGFloat = 46
             let spacing: CGFloat = 12
             let titleHeight: CGFloat = 46
-            let side = max(min(geo.size.height - 2 * margin - titleHeight - scrubberHeight - 2 * spacing, geo.size.width * 0.5), 120)
+            let side = max(min(fullHeight - 2 * margin - titleHeight - scrubberHeight - 2 * spacing,
+                               geo.size.width * 0.5), 120)
             HStack(spacing: 0) {
                 // Cover, then title and artist, then the playback bar.
                 VStack(spacing: spacing) {
@@ -87,8 +94,7 @@ struct SongListView: View {
                 }
                 .padding(.vertical, margin)
                 .padding(.trailing, margin)
-                // Keep the cover clear of the Dynamic Island when it's on the left.
-                .padding(.leading, max(margin, insets.leading))
+                .padding(.leading, leading)
                 .frame(maxHeight: .infinity, alignment: .center)
 
                 VStack(spacing: 0) {
@@ -100,13 +106,12 @@ struct SongListView: View {
                     songList
                         .contentMargins(.bottom, insets.bottom, for: .scrollContent)
                 }
-                // Rows already have 16 pt inside, so this ends them `margin` from the screen edge.
-                // …and the list clear of it when it's on the right.
-                .padding(.trailing, max(margin, insets.trailing) - 16)
+                // Rows already have 16 pt inside, so this ends them `margin` from the screen edge or island.
+                .padding(.trailing, trailing - 16)
                 .padding(.top, margin - 10)
             }
+            .ignoresSafeArea(.container, edges: [.top, .horizontal, .bottom])
         }
-        .ignoresSafeArea(.container, edges: [.top, .horizontal, .bottom])
     }
 
     private var landscapeTopBar: some View {
