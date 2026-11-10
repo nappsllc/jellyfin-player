@@ -87,7 +87,7 @@ struct SongListView: View {
                 // Cover, then title and artist, then the playback bar.
                 VStack(spacing: spacing) {
                     NowPlayingCover(side: side)
-                    NowPlayingInfo(alignment: .leading, showsScrubber: false, titleLines: 1)
+                    NowPlayingInfo(alignment: .leading, showsScrubber: false)
                         .frame(width: side)
                     PlaybackScrubber()
                         .frame(width: side)
