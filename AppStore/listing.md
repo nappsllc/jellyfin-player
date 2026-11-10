@@ -46,11 +46,11 @@ First release.
 - **Sign-in required:** yes. Give a demo server, username and password that work from the internet (see notes).
 - **Notes for the reviewer:**
 
-> JellyPlayer is a client for Jellyfin, an open-source media server that users run themselves. It contains no music. To test it, enter the demo server below in Settings, sign in, choose the "Music" folder, and playback starts.
+> JellyPlayer is a client for Jellyfin, an open-source media server that users run themselves. It contains no music. To test it, enter the demo server below in Settings, sign in, choose the "Music" library (or one album in it), and playback starts. The demo songs are generated tones, not real music.
 >
-> Server: <DEMO SERVER URL>
-> Username: <USER>
-> Password: <PASSWORD>
+> Server: https://jellyplayer-demo.<subdomain>.workers.dev (the demo server in demo-server/)
+> Username: demo
+> Password: demo
 >
 > NSAllowsArbitraryLoads is enabled because users enter the address of their own server, which is often a plain http:// address on their home network (for example http://192.168.1.10:8096). Local network access is requested for the same reason.
 
