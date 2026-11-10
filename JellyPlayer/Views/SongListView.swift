@@ -112,6 +112,8 @@ struct SongListView: View {
             }
             .ignoresSafeArea(.container, edges: [.top, .horizontal, .bottom])
         }
+        // The keyboard must not resize this layout: that re-centred everything and pushed the search field down.
+        .ignoresSafeArea(.keyboard)
     }
 
     private var landscapeTopBar: some View {
