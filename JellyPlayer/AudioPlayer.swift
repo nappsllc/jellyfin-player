@@ -36,6 +36,10 @@ final class AudioPlayer: ObservableObject {
     private var notificationTokens: [NSObjectProtocol] = []
     private var artwork: MPMediaItemArtwork?
     private var artworkTask: Task<Void, Never>?
+    /// Finished car/lock-screen artwork for the playing and next song, kept strongly by song id.
+    /// The image memory cache is emptied when the app goes to the background (screen off), so relying on it
+    /// meant the next cover often had to be fetched again over a sleepy connection, and missed the car.
+    private var preparedArtwork: [String: MPMediaItemArtwork] = [:]
 
     init(client: JellyfinClient) {
         self.client = client
@@ -131,6 +135,7 @@ final class AudioPlayer: ObservableObject {
         elapsed = 0
         duration = 0
         artwork = nil
+        preparedArtwork = [:]
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -204,7 +209,16 @@ final class AudioPlayer: ObservableObject {
         let nextSong = queue[(index + 1) % queue.count]
         // Pre-load the next cover so it's ready the instant the track changes (for car stereos).
         let nextCover = client.imageURLs(for: nextSong, size: 600)
-        Task { _ = await ImageCache.shared.image(for: nextCover) }
+        let nextFallback = client.imageURLs(for: nextSong, size: 150)
+        if preparedArtwork[nextSong.id] == nil {
+            Task { [weak self] in
+                var image = await ImageCache.shared.image(for: nextCover)
+                if image == nil { image = await ImageCache.shared.image(for: nextFallback) }
+                guard let image, let self else { return }
+                let art = await Task.detached { Self.makeArtwork(image) }.value
+                self.preparedArtwork[nextSong.id] = art
+            }
+        }
         guard cacheAudio else { return }
         guard let url = client.directStreamURL(for: nextSong) else { return }
         audioCache.store(songId: nextSong.id, from: url, headers: client.streamHeaders)
@@ -223,50 +237,75 @@ final class AudioPlayer: ObservableObject {
 
     private func loadArtwork(for song: JFItem, thenPlay: Bool) {
         artworkTask?.cancel()
+        // Only the playing song's and the next song's artwork need to stay around.
+        preparedArtwork = preparedArtwork.filter { $0.key == song.id || $0.key == nextSongId }
         let urls = client.imageURLs(for: song, size: 600)
         // Smaller list thumbnails are often already on disk, which helps when offline.
         let fallbackURLs = client.imageURLs(for: song, size: 150)
         // The next song's cover is pre-loaded, so it's usually ready right away.
+        if let prepared = preparedArtwork[song.id] {
+            artwork = prepared
+            updateNowPlaying()
+            if thenPlay { resume() }
+            return
+        }
         if let cached = ImageCache.shared.memoryImage(for: urls) {
             artwork = Self.makeArtwork(cached)
+            preparedArtwork[song.id] = artwork
             updateNowPlaying()
             if thenPlay { resume() }
             return
         }
         artwork = nil
+        // Between songs nothing is playing, so with the screen off iOS could suspend the app mid-download.
+        // Ask for a little background time until the cover is in.
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "cover")
         artworkTask = Task { [weak self] in
-            // Wait up to 3 s for the cover, then start playing either way.
-            let first = await Self.firstCover(urls, fallbackURLs, timeout: 3)
+            defer { if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) } }
+            // One download, shared by the 3 s wait and the rest: a slow connection (common with the
+            // screen off) no longer gets cut off at 3 s and pushed back to a retry 10 s later.
+            let fetch = Task.detached { () -> UIImage? in
+                if let image = await ImageCache.shared.image(for: urls) { return image }
+                return await ImageCache.shared.image(for: fallbackURLs)
+            }
+            let first = await Self.waitForCover(fetch, timeout: 3)
             guard !Task.isCancelled, let self, self.current?.id == song.id else { return }
-            if let first { self.artwork = Self.makeArtwork(first) }
+            if let first { self.setArtwork(first, for: song) }
             self.updateNowPlaying()
             if thenPlay { self.resume() }
             guard first == nil else { return }
 
+            // Not there within 3 s: keep waiting for the same download, then show it as soon as it lands.
+            var image = await fetch.value
             // If the connection is down, keep retrying (10 s, 20 s, 40 s … up to 2 min apart) while this song plays.
             var delay: UInt64 = 10
-            while !Task.isCancelled {
+            while image == nil, !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 delay = min(delay * 2, 120)
-                var image = await ImageCache.shared.image(for: urls)
+                image = await ImageCache.shared.image(for: urls)
                 if image == nil { image = await ImageCache.shared.image(for: fallbackURLs) }
-                guard !Task.isCancelled, self.current?.id == song.id else { return }
-                if let image {
-                    self.artwork = Self.makeArtwork(image)
-                    self.updateNowPlaying()
-                    return
-                }
             }
+            guard let image, !Task.isCancelled, self.current?.id == song.id else { return }
+            self.setArtwork(image, for: song)
+            self.updateNowPlaying()
         }
     }
 
-    /// The song's cover (or its small fallback), or nil if it doesn't arrive within `timeout` seconds.
-    private nonisolated static func firstCover(_ urls: [URL], _ fallbackURLs: [URL], timeout: Double) async -> UIImage? {
+    private var nextSongId: String? {
+        guard queue.count > 1 else { return nil }
+        return queue[(index + 1) % queue.count].id
+    }
+
+    private func setArtwork(_ image: UIImage, for song: JFItem) {
+        let art = Self.makeArtwork(image)
+        artwork = art
+        preparedArtwork[song.id] = art
+    }
+
+    /// The download's result, or nil if it isn't done within `timeout` seconds (the download keeps going).
+    private nonisolated static func waitForCover(_ fetch: Task<UIImage?, Never>, timeout: Double) async -> UIImage? {
         await withTaskGroup(of: UIImage?.self) { group in
-            group.addTask {
-                if let image = await ImageCache.shared.image(for: urls) { return image }
-                return await ImageCache.shared.image(for: fallbackURLs)
-            }
+            group.addTask { await fetch.value }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                 return nil
