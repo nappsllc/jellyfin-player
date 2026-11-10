@@ -19,8 +19,15 @@ Invoke-WebRequest "$base/wrangler.toml" -OutFile "$dir\wrangler.toml" -UseBasicP
 
 Push-Location $dir
 try {
-    $out = npx --yes wrangler@4 deploy 2>&1 | Tee-Object -Variable log
-    $url = ($log | Select-String -Pattern 'https://\S+\.workers\.dev' -AllMatches).Matches | Select-Object -First 1 -ExpandProperty Value
+    # wrangler writes progress to stderr; don't let PowerShell treat that as a failure.
+    $ErrorActionPreference = 'Continue'
+    # Sign in first, outside any pipe, so its browser prompt works normally.
+    $who = npx --yes wrangler@4 whoami 2>&1 | Out-String
+    if ($who -notmatch 'Account ID') { npx --yes wrangler@4 login }
+    $lines = npx --yes wrangler@4 deploy 2>&1 | ForEach-Object { "$_" }
+    $lines | Write-Host
+    if ($LASTEXITCODE -ne 0) { throw 'wrangler deploy failed (see above).' }
+    $url = ([regex]'https://[\w.-]+\.workers\.dev').Match(($lines -join "`n")).Value
     if ($url) {
         $info = Invoke-RestMethod "$url/System/Info/Public"
         Write-Host ''
