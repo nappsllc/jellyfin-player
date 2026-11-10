@@ -56,6 +56,8 @@ struct MarqueeText: View {
     @State private var textWidth: CGFloat = 0
     @State private var boxWidth: CGFloat = 0
     @State private var offset: CGFloat = 0
+    /// Where the text rests: 0 = start shown, 1 = end shown, nil = sliding.
+    @State private var restingAt: Int? = 0
 
     private var overflow: CGFloat { max(textWidth - boxWidth, 0) }
 
@@ -84,10 +86,14 @@ struct MarqueeText: View {
             // Soft fade at the edges while sliding so cut-off letters don't look chopped.
             .mask {
                 if overflow > 0 {
-                    LinearGradient(stops: [.init(color: .clear, location: 0),
-                                           .init(color: .black, location: 0.04),
-                                           .init(color: .black, location: 0.96),
-                                           .init(color: .clear, location: 1)],
+                    // Fade only the edge where text is hidden, so the first or last
+                    // letter is fully readable while the text rests.
+                    let lead: Color = restingAt == 0 ? .black : .clear
+                    let trail: Color = restingAt == 1 ? .black : .clear
+                    LinearGradient(stops: [.init(color: lead, location: 0),
+                                           .init(color: .black, location: 0.05),
+                                           .init(color: .black, location: 0.95),
+                                           .init(color: trail, location: 1)],
                                    startPoint: .leading, endPoint: .trailing)
                 } else {
                     Rectangle()
@@ -100,16 +106,24 @@ struct MarqueeText: View {
 
     private func slide() async {
         offset = 0
+        restingAt = 0
         guard overflow > 0 else { return }
         let duration = max(Double(overflow) / 30, 1)   // ~30 pt per second
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(2))
             if Task.isCancelled { return }
+            withAnimation(.easeInOut(duration: 0.3)) { restingAt = nil }
             withAnimation(.linear(duration: duration)) { offset = -overflow }
-            try? await Task.sleep(for: .seconds(duration + 1.5))
+            try? await Task.sleep(for: .seconds(duration))
             if Task.isCancelled { return }
+            withAnimation(.easeInOut(duration: 0.3)) { restingAt = 1 }
+            try? await Task.sleep(for: .seconds(1.5))
+            if Task.isCancelled { return }
+            withAnimation(.easeInOut(duration: 0.3)) { restingAt = nil }
             withAnimation(.linear(duration: duration)) { offset = 0 }
             try? await Task.sleep(for: .seconds(duration))
+            if Task.isCancelled { return }
+            withAnimation(.easeInOut(duration: 0.3)) { restingAt = 0 }
         }
     }
 }
