@@ -42,6 +42,10 @@ With a free Apple ID the app expires after 7 days and has to be re-signed (AltSt
 
 If the project ever gets out of shape, `brew install xcodegen && xcodegen` regenerates it from `project.yml`.
 
+## App Store / TestFlight
+
+Run **Actions → Upload to TestFlight** by hand. It archives, signs with Xcode cloud signing, and uploads to App Store Connect. It needs the secrets listed at the top of `.github/workflows/testflight.yml`. The listing text is in `AppStore/listing.md` and the privacy policy is in `PRIVACY.md`.
+
 ## Code map
 
 | File | What it does |
