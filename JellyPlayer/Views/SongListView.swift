@@ -95,7 +95,8 @@ struct SongListView: View {
                 .padding(.vertical, margin)
                 .padding(.trailing, margin)
                 .padding(.leading, leading)
-                .frame(maxHeight: .infinity, alignment: .center)
+                // Pinned to the top so the cover's top edge lines up with the folder name and icons.
+                .frame(maxHeight: .infinity, alignment: .top)
 
                 VStack(spacing: 0) {
                     landscapeTopBar
@@ -112,6 +113,8 @@ struct SongListView: View {
             }
             .ignoresSafeArea(.container, edges: [.top, .horizontal, .bottom])
         }
+        // The keyboard must not resize this layout: that re-centred everything and pushed the search field down.
+        .ignoresSafeArea(.keyboard)
     }
 
     private var landscapeTopBar: some View {
