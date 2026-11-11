@@ -134,6 +134,12 @@ final class AudioCache {
         return file
     }
 
+    /// Ids of every saved song, from one directory listing.
+    func cachedSongIds() -> Set<String> {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return Set(files.map { $0.deletingPathExtension().lastPathComponent })
+    }
+
     func isCached(_ songId: String) -> Bool {
         localFile(for: songId) != nil
     }

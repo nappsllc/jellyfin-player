@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
         static let folder = "folder"
         static let lastServer = "lastServer"
         static let cacheAudio = "cacheAudio"
+        static let offlineOnly = "offlineOnly"
     }
 
     let client: JellyfinClient
@@ -27,7 +28,12 @@ final class AppModel: ObservableObject {
             }
         }
     }
+    /// The songs shown and played: the whole folder, or only saved ones in offline mode.
     @Published private(set) var songs: [JFItem] = []
+    /// Every song in the folder.
+    private var allSongs: [JFItem] = [] {
+        didSet { refreshSongs() }
+    }
     @Published private(set) var isLoading = false
     @Published var errorMessage: String? = nil
     @Published var showSettings = false
@@ -46,6 +52,36 @@ final class AppModel: ObservableObject {
         didSet {
             defaults.set(cacheAudio, forKey: Keys.cacheAudio)
             player.cacheAudio = cacheAudio
+        }
+    }
+
+    /// Offline mode: show and play only songs saved on the device, and don't contact the server.
+    @Published var offlineOnly: Bool {
+        didSet {
+            guard offlineOnly != oldValue else { return }
+            defaults.set(offlineOnly, forKey: Keys.offlineOnly)
+            refreshSongs()
+            if offlineOnly {
+                // Swap the queue for saved songs, keeping the current one if it's saved.
+                if let current = player.current, !songs.isEmpty {
+                    if songs.contains(current) {
+                        player.replaceQueue(with: songs)
+                    } else {
+                        player.play(songs: songs, autoplay: player.isPlaying)
+                    }
+                }
+            } else {
+                Task { await reload() }
+            }
+        }
+    }
+
+    private func refreshSongs() {
+        if offlineOnly {
+            let saved = player.audioCache.cachedSongIds()
+            songs = allSongs.filter { saved.contains($0.id) }
+        } else {
+            songs = allSongs
         }
     }
 
@@ -73,6 +109,7 @@ final class AppModel: ObservableObject {
         autoPlay = defaults.object(forKey: Keys.autoPlay) as? Bool ?? true
         shuffle = defaults.bool(forKey: Keys.shuffle)
         cacheAudio = defaults.object(forKey: Keys.cacheAudio) as? Bool ?? true
+        offlineOnly = defaults.bool(forKey: Keys.offlineOnly)
         cacheLimitGB = defaults.object(forKey: AudioCache.limitKey) as? Double ?? AudioCache.defaultLimitGB
         if let data = defaults.data(forKey: Keys.folder) {
             folder = try? JSONDecoder().decode(FolderSelection.self, from: data)
@@ -94,7 +131,7 @@ final class AppModel: ObservableObject {
         }
         // Show (and start playing) the saved list right away, then refresh it from the server.
         if let folder, let cached = SongListCache.load(folderId: folder.id), !cached.isEmpty {
-            songs = cached
+            allSongs = cached
             if autoPlay { player.play(songs: songs) }
             await reload()
         } else {
@@ -104,12 +141,14 @@ final class AppModel: ObservableObject {
     }
 
     func reload() async {
-        guard let folder else { songs = []; return }
+        guard let folder else { allSongs = []; return }
+        // Offline mode never contacts the server; the saved list is used as is.
+        guard !offlineOnly else { return }
         isLoading = true
         defer { isLoading = false }
         do {
             let fresh = try await client.songs(in: folder.id)
-            songs = fresh
+            allSongs = fresh
             SongListCache.save(fresh, folderId: folder.id)
         } catch {
             // Offline with a saved list: keep showing it quietly.
@@ -129,7 +168,7 @@ final class AppModel: ObservableObject {
         SessionStore.clear()
         session = nil
         folder = nil
-        songs = []
+        allSongs = []
     }
 
     /// Bytes used by saved songs and covers.
