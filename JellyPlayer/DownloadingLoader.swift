@@ -23,6 +23,9 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
     private var retries = 0
     private var pending: [AVAssetResourceLoadingRequest] = []
 
+    private static let maxRetries = 45
+    private static func retryDelay(_ attempt: Int) -> Double { min(pow(2, Double(attempt - 1)), 15) }
+
     private let progressLock = NSLock()
     private var downloadedFraction: Double = 0
     /// How much of the song has been downloaded, from 0 to 1. Safe to read from any thread.
@@ -82,7 +85,11 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
             let delegateQueue = OperationQueue()
             delegateQueue.underlyingQueue = queue
             delegateQueue.maxConcurrentOperationCount = 1
-            session = URLSession(configuration: .default, delegate: self, delegateQueue: delegateQueue)
+            let config = URLSessionConfiguration.default
+            // With no network, wait for it to come back instead of failing right away.
+            config.waitsForConnectivity = true
+            config.timeoutIntervalForResource = 15 * 60
+            session = URLSession(configuration: config, delegate: self, delegateQueue: delegateQueue)
         }
         var request = URLRequest(url: remoteURL)
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
@@ -115,6 +122,7 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
         data.append(chunk)
+        retries = 0   // the connection works again, so a later drop gets a fresh set of retries
         if totalLength > 0 { setProgress(min(1, Double(data.count) / Double(totalLength))) }
         processPending()
     }
@@ -123,10 +131,11 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
         guard task === self.task else { return }
         if let error {
             if (error as NSError).code == NSURLErrorCancelled { return }
-            // Keep the pieces we have and resume from there, like a torrent client would.
-            if retries < 5, !data.isEmpty || response == nil {
+            // Keep the pieces we have and resume from there, like a torrent client would. Keep trying for about
+            // 10 minutes (waits of 1, 2, 4 … up to 15 s), so a drop of a few seconds or minutes heals itself.
+            if retries < Self.maxRetries {
                 retries += 1
-                queue.asyncAfter(deadline: .now() + Double(retries)) { [self] in
+                queue.asyncAfter(deadline: .now() + Self.retryDelay(retries)) { [self] in
                     if self.session != nil { startDownload() }
                 }
             } else {
@@ -136,7 +145,14 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
         }
         guard response != nil, totalLength <= 0 || Int64(data.count) >= totalLength else {
             // Connection ended early without an error: resume.
-            if retries < 5 { retries += 1; startDownload() } else { fail(NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)) }
+            if retries < Self.maxRetries {
+                retries += 1
+                queue.asyncAfter(deadline: .now() + Self.retryDelay(retries)) { [self] in
+                    if self.session != nil { startDownload() }
+                }
+            } else {
+                fail(NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost))
+            }
             return
         }
         finished = true
