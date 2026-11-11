@@ -58,7 +58,20 @@ final class AudioPlayer: ObservableObject {
     // MARK: Public controls
 
     /// Start playing `songs`. With shuffle on the order is randomized (the tapped song still plays first).
-    func play(songs: [JFItem], startAt song: JFItem? = nil) {
+    /// Swaps the list being played without interrupting the current song (it must be in `songs`).
+    func replaceQueue(with songs: [JFItem]) {
+        guard let current, songs.contains(current) else { return }
+        originalOrder = songs
+        if shuffleEnabled {
+            queue = [current] + songs.filter { $0 != current }.shuffled()
+            index = 0
+        } else {
+            queue = songs
+            index = songs.firstIndex(of: current) ?? 0
+        }
+    }
+
+    func play(songs: [JFItem], startAt song: JFItem? = nil, autoplay: Bool = true) {
         guard !songs.isEmpty else { return }
         originalOrder = songs
         if shuffleEnabled {
@@ -71,7 +84,7 @@ final class AudioPlayer: ObservableObject {
             index = song.flatMap { songs.firstIndex(of: $0) } ?? 0
         }
         consecutiveFailures = 0
-        load(at: index, autoplay: true)
+        load(at: index, autoplay: autoplay)
     }
 
     func setShuffle(_ on: Bool) {

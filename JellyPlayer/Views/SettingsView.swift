@@ -60,10 +60,11 @@ struct SettingsView: View {
                 Section {
                     Toggle("Auto-play on launch", isOn: $model.autoPlay)
                     Toggle("Shuffle", isOn: $model.shuffle)
+                    Toggle("Play saved songs only", isOn: $model.offlineOnly)
                 } header: {
                     Text("Playback")
                 } footer: {
-                    Text("With auto-play on, music starts as soon as the app opens.")
+                    Text("With auto-play on, music starts as soon as the app opens. Play saved songs only is for when there's no network for a long time: the list shows just the songs saved on this iPhone, and the server isn't contacted.")
                 }
 
                 Section {

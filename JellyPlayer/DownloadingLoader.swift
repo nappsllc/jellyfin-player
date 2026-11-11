@@ -23,7 +23,8 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
     private var retries = 0
     private var pending: [AVAssetResourceLoadingRequest] = []
 
-    private static let maxRetries = 45
+    /// Effectively unlimited: keep trying for as long as this song is loaded.
+    private static let maxRetries = Int.max
     private static func retryDelay(_ attempt: Int) -> Double { min(pow(2, Double(attempt - 1)), 15) }
 
     private let progressLock = NSLock()
@@ -88,7 +89,7 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
             let config = URLSessionConfiguration.default
             // With no network, wait for it to come back instead of failing right away.
             config.waitsForConnectivity = true
-            config.timeoutIntervalForResource = 15 * 60
+            config.timeoutIntervalForResource = 7 * 24 * 60 * 60
             session = URLSession(configuration: config, delegate: self, delegateQueue: delegateQueue)
         }
         var request = URLRequest(url: remoteURL)
@@ -131,8 +132,9 @@ final class DownloadingLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessi
         guard task === self.task else { return }
         if let error {
             if (error as NSError).code == NSURLErrorCancelled { return }
-            // Keep the pieces we have and resume from there, like a torrent client would. Keep trying for about
-            // 10 minutes (waits of 1, 2, 4 … up to 15 s), so a drop of a few seconds or minutes heals itself.
+            // Keep the pieces we have and resume from there, like a torrent client would. Keep trying
+            // (waits of 1, 2, 4 … then every 15 s) for as long as this song is loaded, however long the
+            // network is gone: playback picks up again as soon as there is a connection.
             if retries < Self.maxRetries {
                 retries += 1
                 queue.asyncAfter(deadline: .now() + Self.retryDelay(retries)) { [self] in
