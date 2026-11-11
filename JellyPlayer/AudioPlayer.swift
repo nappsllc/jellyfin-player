@@ -40,6 +40,13 @@ final class AudioPlayer: ObservableObject {
     /// The image memory cache is emptied when the app goes to the background (screen off), so relying on it
     /// meant the next cover often had to be fetched again over a sleepy connection, and missed the car.
     private var preparedArtwork: [String: MPMediaItemArtwork] = [:]
+    /// True while a new track waits (up to 3 s) for its cover before starting. A Play press from the car
+    /// during that time is held until the cover is in, so the car never sees the track start without it.
+    private var waitingForCover = false
+    private var playRequestedWhileWaiting = false
+    /// The first track after the app starts. A car that woke the app with its Play button may have asked
+    /// for the track before the app had one, so the first track is announced a second time shortly after.
+    private var isFirstTrack = true
 
     init(client: JellyfinClient) {
         self.client = client
@@ -85,15 +92,29 @@ final class AudioPlayer: ObservableObject {
             guard !queue.isEmpty else { return }
             load(at: index, autoplay: true)
         } else if player.timeControlStatus == .paused {
-            resume()
+            requestPlay()
         } else {
             pause()
         }
     }
 
+    /// Play from a button (in the app, lock screen or car). Waits for the cover if a new track is still getting it.
+    func requestPlay() {
+        if waitingForCover { playRequestedWhileWaiting = true } else { resume() }
+    }
+
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
         player.play()
+        if isFirstTrack, let songId = current?.id {
+            isFirstTrack = false
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, self.current?.id == songId, self.artwork != nil else { return }
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+                self.updateNowPlaying()
+            }
+        }
     }
 
     func pause() {
@@ -237,6 +258,11 @@ final class AudioPlayer: ObservableObject {
 
     private func loadArtwork(for song: JFItem, thenPlay: Bool) {
         artworkTask?.cancel()
+        // A Play press held for the previous track's cover carries over to this one.
+        let heldPlay = waitingForCover && playRequestedWhileWaiting
+        let shouldPlay = thenPlay || heldPlay
+        waitingForCover = false
+        playRequestedWhileWaiting = false
         // Only the playing song's and the next song's artwork need to stay around.
         preparedArtwork = preparedArtwork.filter { $0.key == song.id || $0.key == nextSongId }
         let urls = client.imageURLs(for: song, size: 600)
@@ -246,17 +272,19 @@ final class AudioPlayer: ObservableObject {
         if let prepared = preparedArtwork[song.id] {
             artwork = prepared
             updateNowPlaying()
-            if thenPlay { resume() }
+            if shouldPlay { resume() }
             return
         }
         if let cached = ImageCache.shared.memoryImage(for: urls) {
             artwork = Self.makeArtwork(cached)
             preparedArtwork[song.id] = artwork
             updateNowPlaying()
-            if thenPlay { resume() }
+            if shouldPlay { resume() }
             return
         }
         artwork = nil
+        waitingForCover = true
+        playRequestedWhileWaiting = false
         // Between songs nothing is playing, so with the screen off iOS could suspend the app mid-download.
         // Ask for a little background time until the cover is in.
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "cover")
@@ -270,9 +298,12 @@ final class AudioPlayer: ObservableObject {
             }
             let first = await Self.waitForCover(fetch, timeout: 3)
             guard !Task.isCancelled, let self, self.current?.id == song.id else { return }
+            let play = shouldPlay || self.playRequestedWhileWaiting
+            self.waitingForCover = false
+            self.playRequestedWhileWaiting = false
             if let first { self.setArtwork(first, for: song) }
             self.updateNowPlaying()
-            if thenPlay { self.resume() }
+            if play { self.resume() }
             guard first == nil else { return }
 
             // Not there within 3 s: keep waiting for the same download, then show it as soon as it lands.
@@ -287,6 +318,9 @@ final class AudioPlayer: ObservableObject {
             }
             guard let image, !Task.isCancelled, self.current?.id == song.id else { return }
             self.setArtwork(image, for: song)
+            // The track was already announced without a cover, and many car stereos only read the cover when
+            // the track changes. Clearing the info first makes it look like a fresh track, so they read it again.
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             self.updateNowPlaying()
         }
     }
@@ -387,7 +421,7 @@ final class AudioPlayer: ObservableObject {
                   let rawOptions = info[AVAudioSessionInterruptionOptionKey] as? UInt,
                   AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume)
             else { return }
-            MainActor.assumeIsolated { _ = self?.resume() }
+            MainActor.assumeIsolated { _ = self?.requestPlay() }
         })
     }
 
