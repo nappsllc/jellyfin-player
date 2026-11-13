@@ -49,6 +49,10 @@ final class AudioPlayer: ObservableObject {
     private var isFirstTrack = true
     private var scanTimer: Timer?
     private var reannouncing = false
+    /// Changes every time a track is announced afresh. Sent as the track's id, so a re-announce looks
+    /// like a different track to the system and the car asks for the title and cover again.
+    private var announceSerial: UInt64 = UInt64(Date().timeIntervalSince1970)
+    private var lastLoggedAnnouncement = ""
     private var reannouncedSongId: String?
 
     init(client: JellyfinClient) {
@@ -122,6 +126,7 @@ final class AudioPlayer: ObservableObject {
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
         player.play()
+        DiagLog.shared.add("  play\(artwork == nil ? " (no cover yet)" : " (cover set)")")
         if isFirstTrack, let songId = current?.id {
             isFirstTrack = false
             Task { [weak self] in
@@ -188,6 +193,7 @@ final class AudioPlayer: ObservableObject {
         guard queue.indices.contains(i) else { return }
         scan(0)
         reannouncing = false
+        announceSerial &+= 1
         let localFile = transcoded ? nil : audioCache.localFile(for: queue[i].id)
         let url = localFile ?? (transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i]))
         guard let url else { return }
@@ -217,6 +223,7 @@ final class AudioPlayer: ObservableObject {
         } else {
             asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": client.streamHeaders])
         }
+        DiagLog.shared.add("SONG \(song.name) [\(song.id.prefix(8))] \(localFile != nil ? "saved file" : "from server")\(isFirstTrack ? ", first after launch" : "")")
         let item = AVPlayerItem(asset: asset)
         statusObservation = item.observe(\.status) { [weak self] item, _ in
             let status = item.status
@@ -294,12 +301,14 @@ final class AudioPlayer: ObservableObject {
         let fallbackURLs = client.imageURLs(for: song, size: 150)
         // The next song's cover is pre-loaded, so it's usually ready right away.
         if let prepared = preparedArtwork[song.id] {
+            DiagLog.shared.add("  cover: ready in advance")
             artwork = prepared
             updateNowPlaying()
             if shouldPlay { resume() }
             return
         }
         if let cached = ImageCache.shared.memoryImage(for: urls) {
+            DiagLog.shared.add("  cover: in memory")
             artwork = Self.makeArtwork(cached)
             preparedArtwork[song.id] = artwork
             updateNowPlaying()
@@ -309,6 +318,8 @@ final class AudioPlayer: ObservableObject {
         artwork = nil
         waitingForCover = true
         playRequestedWhileWaiting = false
+        DiagLog.shared.add("  cover: not ready, loading (disk, then server)")
+        let waitStarted = Date()
         // Between songs nothing is playing, so with the screen off iOS could suspend the app mid-download.
         // Ask for a little background time until the cover is in.
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "cover")
@@ -325,22 +336,37 @@ final class AudioPlayer: ObservableObject {
             let play = shouldPlay || self.playRequestedWhileWaiting
             self.waitingForCover = false
             self.playRequestedWhileWaiting = false
+            let waited = String(format: "%.1f", Date().timeIntervalSince(waitStarted))
+            DiagLog.shared.add("  cover: \(first == nil ? "NOT loaded" : "loaded") after \(waited) s wait")
             if let first { self.setArtwork(first, for: song) }
             self.updateNowPlaying()
-            if play { self.resume() }
+            if play {
+                // On the very first song the system starts telling the car about this app the moment
+                // playback begins. Give it a moment to take in the cover first, or the car can get the
+                // title without it.
+                if self.isFirstTrack, first != nil {
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    guard !Task.isCancelled, self.current?.id == song.id else { return }
+                }
+                self.resume()
+            }
             guard first == nil else { return }
 
             // Not there within 3 s: keep waiting for the same download, then show it as soon as it lands.
             var image = await fetch.value
             // If the connection is down, keep retrying (10 s, 20 s, 40 s … up to 2 min apart) while this song plays.
-            var delay: UInt64 = 10
+            // Quick at first (2, 4, 8 s …), because right after launch the network is often just not up yet.
+            var delay: UInt64 = 2
             while image == nil, !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 delay = min(delay * 2, 120)
+                // A "no image" answer may have been the server still preparing it; ask again.
+                ImageCache.shared.forgetMissing(urls + fallbackURLs)
                 image = await ImageCache.shared.image(for: urls)
                 if image == nil { image = await ImageCache.shared.image(for: fallbackURLs) }
             }
             guard let image, !Task.isCancelled, self.current?.id == song.id else { return }
+            DiagLog.shared.add("  cover: loaded late, announcing the song again")
             self.setArtwork(image, for: song)
             // The track was already announced without a cover, and many car stereos only read the cover when
             // the track changes. Clearing the info first makes it look like a fresh track, so they read it again.
@@ -355,6 +381,8 @@ final class AudioPlayer: ObservableObject {
         guard let songId = current?.id else { return }
         reannouncedSongId = songId
         reannouncing = true
+        announceSerial &+= 1
+        DiagLog.shared.add("  re-announce to lock screen / car")
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -394,7 +422,10 @@ final class AudioPlayer: ObservableObject {
     /// (as the first builds did, when car covers worked) and isn't tied to the main actor.
     private nonisolated static func makeArtwork(_ image: UIImage) -> MPMediaItemArtwork {
         let square = squareImage(image, side: 600)
-        return MPMediaItemArtwork(boundsSize: square.size) { _ in square }
+        return MPMediaItemArtwork(boundsSize: square.size) { size in
+            DiagLog.shared.add("  system asked for the cover at \(Int(size.width))x\(Int(size.height))")
+            return square
+        }
     }
 
     private nonisolated static func squareImage(_ image: UIImage, side: CGFloat) -> UIImage {
@@ -460,6 +491,7 @@ final class AudioPlayer: ObservableObject {
                   let rawOptions = info[AVAudioSessionInterruptionOptionKey] as? UInt,
                   AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume)
             else { return }
+            DiagLog.shared.add("BUTTON play (car / lock screen / headphones)")
             MainActor.assumeIsolated { _ = self?.requestPlay() }
         })
     }
@@ -583,6 +615,12 @@ final class AudioPlayer: ObservableObject {
         ]
         if let album = current.album { info[MPMediaItemPropertyAlbumTitle] = album }
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
+        info[MPMediaItemPropertyPersistentID] = NSNumber(value: announceSerial)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        let announcement = "\(current.id)|\(announceSerial)|\(artwork != nil)"
+        if announcement != lastLoggedAnnouncement {
+            lastLoggedAnnouncement = announcement
+            DiagLog.shared.add("  announced \(artwork != nil ? "WITH" : "WITHOUT") cover")
+        }
     }
 }
