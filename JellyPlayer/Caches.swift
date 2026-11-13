@@ -67,16 +67,52 @@ final class ImageCache: @unchecked Sendable {
             return image
         }
 
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+        let label = Self.label(url)
+        let started = Date()
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await Self.session.data(from: url)
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            DiagLog.shared.add("  image \(label): network error \((error as NSError).code) after \(ms) ms")
+            return nil
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
         guard status == 200, let image = UIImage(data: data) else {
+            DiagLog.shared.add("  image \(label): HTTP \(status), \(data.count) bytes, \(ms) ms, not usable")
             // Only a clear "not found" counts as no image; anything else (e.g. a flaky connection) is retried.
             if status == 404 { lock.withLock { missing[url] = Date() } }
             return nil
         }
+        DiagLog.shared.add("  image \(label): downloaded \(data.count / 1024) KB in \(ms) ms")
         try? data.write(to: file, options: .atomic)
         memory.setObject(image, forKey: url as NSURL)
         return image
+    }
+
+    /// Covers wait for the network to come up (e.g. a VPN still connecting right after launch) instead of
+    /// failing at once, but give up after 20 s so the caller can try again.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 20
+        return URLSession(configuration: config)
+    }()
+
+    /// Short name for the log: "<start of item id> @<size>".
+    private static func label(_ url: URL) -> String {
+        let parts = url.pathComponents
+        let id = parts.count > 2 ? String(parts[parts.count - 3].prefix(8)) : "?"
+        let size = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "maxWidth" }?.value ?? "?"
+        return "\(id) @\(size)"
+    }
+
+    /// Forgets "this URL has no image" marks, so the playing song's cover is asked for again right away.
+    func forgetMissing(_ urls: [URL]) {
+        lock.withLock { urls.forEach { missing[$0] = nil } }
     }
 
     private func isMissing(_ url: URL) -> Bool {

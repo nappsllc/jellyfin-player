@@ -97,6 +97,9 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Version", value: Self.appVersion)
+                    NavigationLink("Cover log") { CoverLogView() }
+                } footer: {
+                    Text("The cover log records how each song's cover was loaded and sent to the lock screen and car. It stays on this iPhone unless you copy or share it.")
                 }
             }
             .onAppear { cacheSize = model.cacheSize() }
@@ -133,6 +136,39 @@ struct SettingsView: View {
             password = ""
         } catch {
             signInError = error.localizedDescription
+        }
+    }
+}
+
+
+/// Shows the on-device cover log, newest at the bottom, with copy, share and clear.
+struct CoverLogView: View {
+    @State private var text = DiagLog.shared.text
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Text(text.isEmpty ? "Nothing logged yet. Play a song first." : text)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                Color.clear.frame(height: 1).id("end")
+            }
+            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+        }
+        .navigationTitle("Cover log")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Copy") { UIPasteboard.general.string = text }
+                ShareLink(item: text) { Image(systemName: "square.and.arrow.up") }
+                    .accessibilityLabel("Share")
+                Button("Clear", role: .destructive) {
+                    DiagLog.shared.clear()
+                    text = ""
+                }
+            }
         }
     }
 }
