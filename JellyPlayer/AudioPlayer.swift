@@ -48,6 +48,8 @@ final class AudioPlayer: ObservableObject {
     /// for the track before the app had one, so the first track is announced a second time shortly after.
     private var isFirstTrack = true
     private var scanTimer: Timer?
+    private var reannouncing = false
+    private var reannouncedSongId: String?
 
     init(client: JellyfinClient) {
         self.client = client
@@ -124,9 +126,15 @@ final class AudioPlayer: ObservableObject {
             isFirstTrack = false
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard let self, self.current?.id == songId, self.artwork != nil else { return }
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-                self.updateNowPlaying()
+                // Wait for the cover if it's still on its way (up to 30 s), then announce again with it.
+                for _ in 0..<30 {
+                    guard let self, self.current?.id == songId else { return }
+                    if self.artwork != nil { break }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                guard let self, self.current?.id == songId, self.artwork != nil,
+                      self.reannouncedSongId != songId else { return }
+                self.reannounce()
             }
         }
     }
@@ -179,6 +187,7 @@ final class AudioPlayer: ObservableObject {
     private func load(at i: Int, autoplay: Bool, transcoded: Bool = false) {
         guard queue.indices.contains(i) else { return }
         scan(0)
+        reannouncing = false
         let localFile = transcoded ? nil : audioCache.localFile(for: queue[i].id)
         let url = localFile ?? (transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i]))
         guard let url else { return }
@@ -335,7 +344,22 @@ final class AudioPlayer: ObservableObject {
             self.setArtwork(image, for: song)
             // The track was already announced without a cover, and many car stereos only read the cover when
             // the track changes. Clearing the info first makes it look like a fresh track, so they read it again.
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            self.reannounce()
+        }
+    }
+
+    /// Announces the current track again as if it were new, so a car that already read it without a cover
+    /// reads it again. The info is cleared, left empty for a moment (set back at once, the system merges the
+    /// two steps and the car sees no change), then published with the cover.
+    private func reannounce() {
+        guard let songId = current?.id else { return }
+        reannouncedSongId = songId
+        reannouncing = true
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let self else { return }
+            self.reannouncing = false
             self.updateNowPlaying()
         }
     }
@@ -548,6 +572,8 @@ final class AudioPlayer: ObservableObject {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
+        // Mid re-announce the info stays empty on purpose; it's published when that finishes.
+        guard !reannouncing else { return }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: current.name,
             MPMediaItemPropertyArtist: current.artistLine,
