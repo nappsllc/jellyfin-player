@@ -47,6 +47,9 @@ final class AudioPlayer: ObservableObject {
     /// The first track after the app starts. A car that woke the app with its Play button may have asked
     /// for the track before the app had one, so the first track is announced a second time shortly after.
     private var isFirstTrack = true
+    private var scanTimer: Timer?
+    private var reannouncing = false
+    private var reannouncedSongId: String?
 
     init(client: JellyfinClient) {
         self.client = client
@@ -123,9 +126,15 @@ final class AudioPlayer: ObservableObject {
             isFirstTrack = false
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard let self, self.current?.id == songId, self.artwork != nil else { return }
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-                self.updateNowPlaying()
+                // Wait for the cover if it's still on its way (up to 30 s), then announce again with it.
+                for _ in 0..<30 {
+                    guard let self, self.current?.id == songId else { return }
+                    if self.artwork != nil { break }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                guard let self, self.current?.id == songId, self.artwork != nil,
+                      self.reannouncedSongId != songId else { return }
+                self.reannounce()
             }
         }
     }
@@ -177,6 +186,8 @@ final class AudioPlayer: ObservableObject {
 
     private func load(at i: Int, autoplay: Bool, transcoded: Bool = false) {
         guard queue.indices.contains(i) else { return }
+        scan(0)
+        reannouncing = false
         let localFile = transcoded ? nil : audioCache.localFile(for: queue[i].id)
         let url = localFile ?? (transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i]))
         guard let url else { return }
@@ -333,7 +344,22 @@ final class AudioPlayer: ObservableObject {
             self.setArtwork(image, for: song)
             // The track was already announced without a cover, and many car stereos only read the cover when
             // the track changes. Clearing the info first makes it look like a fresh track, so they read it again.
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            self.reannounce()
+        }
+    }
+
+    /// Announces the current track again as if it were new, so a car that already read it without a cover
+    /// reads it again. The info is cleared, left empty for a moment (set back at once, the system merges the
+    /// two steps and the car sees no change), then published with the cover.
+    private func reannounce() {
+        guard let songId = current?.id else { return }
+        reannouncedSongId = songId
+        reannouncing = true
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let self else { return }
+            self.reannouncing = false
             self.updateNowPlaying()
         }
     }
@@ -476,7 +502,7 @@ final class AudioPlayer: ObservableObject {
     private func configureRemoteCommands() {
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { _ = self?.resume() }
+            MainActor.assumeIsolated { _ = self?.requestPlay() }
             return .success
         }
         commands.pauseCommand.addTarget { [weak self] _ in
@@ -495,6 +521,20 @@ final class AudioPlayer: ObservableObject {
             MainActor.assumeIsolated { _ = self?.previous() }
             return .success
         }
+        // Holding next / previous on a car stereo or headphones sends fast-forward / rewind over Bluetooth
+        // (Bluetooth has no "jump to this position"), so scan through the song while the button is held.
+        commands.seekForwardCommand.addTarget { [weak self] event in
+            guard let event = event as? MPSeekCommandEvent else { return .commandFailed }
+            let begin = event.type == .beginSeeking
+            MainActor.assumeIsolated { _ = self?.scan(begin ? 1 : 0) }
+            return .success
+        }
+        commands.seekBackwardCommand.addTarget { [weak self] event in
+            guard let event = event as? MPSeekCommandEvent else { return .commandFailed }
+            let begin = event.type == .beginSeeking
+            MainActor.assumeIsolated { _ = self?.scan(begin ? -1 : 0) }
+            return .success
+        }
         commands.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             let position = event.positionTime
@@ -503,11 +543,37 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
+    /// Scans through the song while a fast-forward (1) or rewind (-1) button is held; 0 stops.
+    /// Moves 5 s of music every 0.4 s, and never past the ends (so it can't skip to another song).
+    private func scan(_ direction: Double) {
+        scanTimer?.invalidate()
+        scanTimer = nil
+        guard direction != 0, current != nil else { return }
+        let step: () -> Void = { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.duration > 0 else { return }
+                let target = min(max(self.elapsed + direction * 5, 0), max(self.duration - 2, 0))
+                self.seek(to: target)
+            }
+        }
+        step()
+        let timer = Timer(timeInterval: 0.4, repeats: true) { _ in step() }
+        RunLoop.main.add(timer, forMode: .common)
+        scanTimer = timer
+        // Safety net: a car that never sends "released" must not scan forever.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self, weak timer] in
+            guard let timer, timer.isValid else { return }
+            MainActor.assumeIsolated { if self?.scanTimer === timer { self?.scan(0) } else { timer.invalidate() } }
+        }
+    }
+
     private func updateNowPlaying() {
         guard let current else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
+        // Mid re-announce the info stays empty on purpose; it's published when that finishes.
+        guard !reannouncing else { return }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: current.name,
             MPMediaItemPropertyArtist: current.artistLine,
