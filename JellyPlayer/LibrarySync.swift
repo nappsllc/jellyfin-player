@@ -171,7 +171,7 @@ final class LibrarySync: ObservableObject {
 
     /// Sleeps, but wakes early when the song list changes.
     private func sleep(_ seconds: TimeInterval) async {
-        let sleeper = Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        let sleeper = Task<Void, Never> { _ = try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         self.sleeper = sleeper
         await sleeper.value
     }
