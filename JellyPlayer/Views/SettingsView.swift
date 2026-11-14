@@ -84,6 +84,7 @@ struct SettingsView: View {
                             cacheSize = model.cacheSize()
                         }
                     }
+                    DownloadAllRows(sync: model.sync)
                     LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file))
                     Button("Clear cache", role: .destructive) {
                         model.clearCache()
@@ -92,7 +93,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Storage")
                 } footer: {
-                    Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Once the limit is reached, the songs played longest ago are removed first.")
+                    Text("Covers and played songs are kept on this iPhone so they load instantly and play offline. Once the limit is reached, the songs played longest ago are removed first. Download all saves every song in the folder one by one, ignores the limit, and checks the server for new songs every few minutes. It runs while the app is open or playing; iOS pauses it soon after the app goes to the background with nothing playing.")
                 }
 
                 Section {
@@ -169,6 +170,53 @@ struct CoverLogView: View {
                     text = ""
                 }
             }
+        }
+    }
+}
+
+
+/// The "Download all" switch with its progress: overall bar, "8 of 67 · 12% · 312 MB", and the current song.
+struct DownloadAllRows: View {
+    @ObservedObject var sync: LibrarySync
+
+    var body: some View {
+        Toggle("Download all", isOn: $sync.enabled)
+        if sync.enabled {
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: sync.fraction)
+                Text(summary)
+                    .font(.subheadline.monospacedDigit())
+                if let detail {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private var summary: String {
+        let percent = Int((sync.fraction * 100).rounded(.down))
+        let bytes = sync.savedBytes + (sync.currentName == nil ? 0 : sync.currentBytes)
+        return "\(sync.done) of \(sync.total) · \(percent)% · \(Self.size(bytes))"
+    }
+
+    private var detail: String? {
+        let skipped = sync.skipped > 0 ? " \(sync.skipped) can't be saved (format not playable offline)." : ""
+        switch sync.status {
+        case .off: return nil
+        case .checking: return "Checking the server folder…"
+        case .downloading:
+            guard let name = sync.currentName else { return nil }
+            return "\(name): \(Int(sync.currentFraction * 100))% (\(Self.size(sync.currentBytes)))"
+        case .waiting(let message), .paused(let message): return message + "." + skipped
+        case .complete: return "All songs are saved. Watching for new ones." + skipped
         }
     }
 }

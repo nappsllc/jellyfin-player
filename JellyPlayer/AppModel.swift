@@ -14,6 +14,8 @@ final class AppModel: ObservableObject {
 
     let client: JellyfinClient
     let player: AudioPlayer
+    /// "Download all": keeps the whole folder saved on the phone.
+    let sync: LibrarySync
     private let defaults = UserDefaults.standard
 
     @Published private(set) var session: JellyfinSession? = nil {
@@ -32,7 +34,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var songs: [JFItem] = []
     /// Every song in the folder.
     private var allSongs: [JFItem] = [] {
-        didSet { refreshSongs() }
+        didSet {
+            refreshSongs()
+            sync.songsChanged()
+        }
     }
     @Published private(set) var isLoading = false
     @Published var errorMessage: String? = nil
@@ -105,7 +110,9 @@ final class AppModel: ObservableObject {
         let defaults = UserDefaults.standard
         let client = JellyfinClient()
         self.client = client
-        player = AudioPlayer(client: client)
+        let player = AudioPlayer(client: client)
+        self.player = player
+        sync = LibrarySync(client: client, cache: player.audioCache)
         autoPlay = defaults.object(forKey: Keys.autoPlay) as? Bool ?? true
         shuffle = defaults.bool(forKey: Keys.shuffle)
         cacheAudio = defaults.object(forKey: Keys.cacheAudio) as? Bool ?? true
@@ -119,6 +126,9 @@ final class AppModel: ObservableObject {
         client.session = savedSession
         player.setShuffle(shuffle)
         player.cacheAudio = cacheAudio
+        sync.songs = { [weak self] in self?.allSongs ?? [] }
+        sync.refresh = { [weak self] in await self?.reload() }
+        sync.isOffline = { [weak self] in self?.offlineOnly ?? false }
     }
 
     /// Called once when the app opens: load the folder and auto-play if that setting is on.
@@ -138,6 +148,7 @@ final class AppModel: ObservableObject {
             await reload()
             if autoPlay { player.play(songs: songs) }
         }
+        sync.songsChanged()
     }
 
     func reload() async {
@@ -148,7 +159,8 @@ final class AppModel: ObservableObject {
         defer { isLoading = false }
         do {
             let fresh = try await client.songs(in: folder.id)
-            allSongs = fresh
+            // Only touch the list when it really changed, so a routine check doesn't redraw everything.
+            if fresh.map(\.id) != allSongs.map(\.id) || allSongs.isEmpty { allSongs = fresh }
             SongListCache.save(fresh, folderId: folder.id)
         } catch {
             // Offline with a saved list: keep showing it quietly.
@@ -177,6 +189,7 @@ final class AppModel: ObservableObject {
     }
 
     func clearCache() {
+        sync.enabled = false
         player.audioCache.clear()
         ImageCache.shared.clear()
         SongListCache.clear()
