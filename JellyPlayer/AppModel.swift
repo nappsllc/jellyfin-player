@@ -142,11 +142,11 @@ final class AppModel: ObservableObject {
         // Show (and start playing) the saved list right away, then refresh it from the server.
         if let folder, let cached = SongListCache.load(folderId: folder.id), !cached.isEmpty {
             allSongs = cached
-            if autoPlay { player.play(songs: songs) }
+            if autoPlay || player.playRequestedEarly { player.play(songs: songs) }
             await reload()
         } else {
             await reload()
-            if autoPlay { player.play(songs: songs) }
+            if autoPlay || player.playRequestedEarly { player.play(songs: songs) }
         }
         sync.songsChanged()
     }
