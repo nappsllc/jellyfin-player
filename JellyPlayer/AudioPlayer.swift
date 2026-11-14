@@ -44,6 +44,9 @@ final class AudioPlayer: ObservableObject {
     /// during that time is held until the cover is in, so the car never sees the track start without it.
     private var waitingForCover = false
     private var playRequestedWhileWaiting = false
+    /// A Play press (usually the car waking the app) that came before any song was loaded.
+    /// It is remembered and honoured when the first song loads, after its cover is in.
+    private(set) var playRequestedEarly = false
     /// The first track after the app starts. A car that woke the app with its Play button may have asked
     /// for the track before the app had one, so the first track is announced a second time shortly after.
     private var isFirstTrack = true
@@ -89,7 +92,9 @@ final class AudioPlayer: ObservableObject {
             index = song.flatMap { songs.firstIndex(of: $0) } ?? 0
         }
         consecutiveFailures = 0
-        load(at: index, autoplay: autoplay)
+        let early = playRequestedEarly
+        playRequestedEarly = false
+        load(at: index, autoplay: autoplay || early)
     }
 
     func setShuffle(_ on: Bool) {
@@ -107,7 +112,11 @@ final class AudioPlayer: ObservableObject {
 
     func togglePlayPause() {
         if player.currentItem == nil {
-            guard !queue.isEmpty else { return }
+            guard !queue.isEmpty else {
+                DiagLog.shared.add("  play pressed before any song was loaded: remembered")
+                playRequestedEarly = true
+                return
+            }
             load(at: index, autoplay: true)
         } else if player.timeControlStatus == .paused {
             requestPlay()
@@ -118,6 +127,17 @@ final class AudioPlayer: ObservableObject {
 
     /// Play from a button (in the app, lock screen or car). Waits for the cover if a new track is still getting it.
     func requestPlay() {
+        guard player.currentItem != nil else {
+            // Nothing is loaded yet (the car's Play button just woke the app). Telling the player to play
+            // now would make the first song start the instant it loads, before its cover is published.
+            if queue.isEmpty {
+                DiagLog.shared.add("  play pressed before any song was loaded: remembered")
+                playRequestedEarly = true
+            } else {
+                load(at: index, autoplay: true)
+            }
+            return
+        }
         if waitingForCover { playRequestedWhileWaiting = true } else { resume() }
     }
 
@@ -212,6 +232,12 @@ final class AudioPlayer: ObservableObject {
             let status = item.status
             let error = item.error?.localizedDescription
             Task { @MainActor in self?.itemStatusChanged(status, error: error) }
+        }
+        // A player that is still "playing" starts a new item the moment it's ready. When the cover isn't
+        // in hand yet, pause first, so the song only starts once the cover has been published.
+        if preparedArtwork[song.id] == nil,
+           ImageCache.shared.memoryImage(for: client.imageURLs(for: song, size: 600)) == nil {
+            player.pause()
         }
         player.replaceCurrentItem(with: item)
 
