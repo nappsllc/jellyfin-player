@@ -2,10 +2,25 @@ import CryptoKit
 import Foundation
 import UIKit
 
+/// A folder for saved songs, covers or song lists. It lives in Application Support, which iOS never
+/// empties on its own (the Caches folder can be cleared when the phone runs low on space, which would
+/// break playing offline). Kept out of iCloud/iTunes backups. Files saved by earlier versions in Caches
+/// are moved over.
 private func cachesDirectory(_ name: String) -> URL {
-    let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    let dir = base.appendingPathComponent(name, isDirectory: true)
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let fm = FileManager.default
+    let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    var dir = base.appendingPathComponent(name, isDirectory: true)
+    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try? dir.setResourceValues(values)
+    let old = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent(name, isDirectory: true)
+    if let files = try? fm.contentsOfDirectory(at: old, includingPropertiesForKeys: nil) {
+        for file in files {
+            try? fm.moveItem(at: file, to: dir.appendingPathComponent(file.lastPathComponent))
+        }
+        try? fm.removeItem(at: old)
+    }
     return dir
 }
 
@@ -151,6 +166,10 @@ final class AudioCache {
         return Int64(gb * 1_000_000_000)
     }
 
+    /// Set by "Download all": keep every song and ignore the size limit.
+    static let keepAllKey = "downloadAll"
+    static var keepsAll: Bool { UserDefaults.standard.bool(forKey: keepAllKey) }
+
     private let directory = cachesDirectory("audio")
     private var inFlight = Set<String>()
 
@@ -200,6 +219,16 @@ final class AudioCache {
         }
     }
 
+    /// Takes over a finished download (used by "Download all"). Returns false if the format can't be kept.
+    func adopt(_ file: URL, songId: String, mimeType: String, fileName: String) -> Bool {
+        let known = Set(Self.extensions.values)
+        let fromName = (fileName as NSString).pathExtension.lowercased()
+        guard let ext = Self.extensions[mimeType] ?? (known.contains(fromName) ? fromName : nil) else { return false }
+        let destination = directory.appendingPathComponent("\(songId).\(ext)")
+        try? FileManager.default.removeItem(at: destination)
+        return (try? FileManager.default.moveItem(at: file, to: destination)) != nil
+    }
+
     /// Saves a song that was downloaded while it played.
     func save(_ data: Data, songId: String, mimeType: String) {
         guard let ext = Self.extensions[mimeType.lowercased()], !isCached(songId) else { return }
@@ -210,6 +239,7 @@ final class AudioCache {
 
     /// Removes the least recently played songs until the cache fits the limit.
     func evictIfNeeded() {
+        guard !Self.keepsAll else { return }
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         var files = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys)) ?? [])
             .map { url -> (url: URL, size: Int64, date: Date) in
