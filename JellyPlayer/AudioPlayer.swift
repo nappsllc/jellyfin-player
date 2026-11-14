@@ -48,12 +48,10 @@ final class AudioPlayer: ObservableObject {
     /// for the track before the app had one, so the first track is announced a second time shortly after.
     private var isFirstTrack = true
     private var scanTimer: Timer?
-    private var reannouncing = false
     /// Changes every time a track is announced afresh. Sent as the track's id, so a re-announce looks
     /// like a different track to the system and the car asks for the title and cover again.
     private var announceSerial: UInt64 = UInt64(Date().timeIntervalSince1970)
     private var lastLoggedAnnouncement = ""
-    private var reannouncedSongId: String?
 
     init(client: JellyfinClient) {
         self.client = client
@@ -127,21 +125,7 @@ final class AudioPlayer: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(true)
         player.play()
         DiagLog.shared.add("  play\(artwork == nil ? " (no cover yet)" : " (cover set)")")
-        if isFirstTrack, let songId = current?.id {
-            isFirstTrack = false
-            Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                // Wait for the cover if it's still on its way (up to 30 s), then announce again with it.
-                for _ in 0..<30 {
-                    guard let self, self.current?.id == songId else { return }
-                    if self.artwork != nil { break }
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                }
-                guard let self, self.current?.id == songId, self.artwork != nil,
-                      self.reannouncedSongId != songId else { return }
-                self.reannounce()
-            }
-        }
+        isFirstTrack = false
     }
 
     func pause() {
@@ -192,7 +176,6 @@ final class AudioPlayer: ObservableObject {
     private func load(at i: Int, autoplay: Bool, transcoded: Bool = false) {
         guard queue.indices.contains(i) else { return }
         scan(0)
-        reannouncing = false
         announceSerial &+= 1
         let localFile = transcoded ? nil : audioCache.localFile(for: queue[i].id)
         let url = localFile ?? (transcoded ? client.transcodedStreamURL(for: queue[i]) : client.directStreamURL(for: queue[i]))
@@ -368,28 +351,17 @@ final class AudioPlayer: ObservableObject {
             guard let image, !Task.isCancelled, self.current?.id == song.id else { return }
             DiagLog.shared.add("  cover: loaded late, announcing the song again")
             self.setArtwork(image, for: song)
-            // The track was already announced without a cover, and many car stereos only read the cover when
-            // the track changes. Clearing the info first makes it look like a fresh track, so they read it again.
             self.reannounce()
         }
     }
 
-    /// Announces the current track again as if it were new, so a car that already read it without a cover
-    /// reads it again. The info is cleared, left empty for a moment (set back at once, the system merges the
-    /// two steps and the car sees no change), then published with the cover.
+    /// A cover that arrived after the track was already announced: publish it under a new track id, so the
+    /// system passes it on as a change. The info is never cleared first: on a Tesla, clearing it made the
+    /// car drop the cover it had and not ask again.
     private func reannounce() {
-        guard let songId = current?.id else { return }
-        reannouncedSongId = songId
-        reannouncing = true
         announceSerial &+= 1
-        DiagLog.shared.add("  re-announce to lock screen / car")
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard let self else { return }
-            self.reannouncing = false
-            self.updateNowPlaying()
-        }
+        DiagLog.shared.add("  late cover: published under a new track id")
+        updateNowPlaying()
     }
 
     private var nextSongId: String? {
@@ -604,8 +576,6 @@ final class AudioPlayer: ObservableObject {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
-        // Mid re-announce the info stays empty on purpose; it's published when that finishes.
-        guard !reannouncing else { return }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: current.name,
             MPMediaItemPropertyArtist: current.artistLine,
