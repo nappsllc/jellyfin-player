@@ -11,9 +11,23 @@ struct SongListView: View {
     @State private var showSearch = false
     @FocusState private var searchFocused: Bool
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    /// Size of the space this view gets, not counting the keyboard. Follows rotation, folding/unfolding
+    /// and window resizing, so the layout never depends on a fixed screen size.
+    @State private var containerSize: CGSize = .zero
 
-    /// iPhone held sideways: big player on the left, list on the right.
-    private var isLandscape: Bool { verticalSizeClass == .compact && player.current != nil }
+    /// Wide space (iPhone held sideways, or a foldable's large inner screen opened up): big player on the
+    /// left, list on the right. Narrow space (portrait, or folded): player above the list.
+    private var isLandscape: Bool {
+        guard player.current != nil else { return false }
+        if verticalSizeClass == .compact { return true }
+        return Self.isWide(containerSize)
+    }
+
+    /// At least 600 pt wide, or wider than tall. Every iPhone in portrait is under 450 pt wide,
+    /// while an unfolded inner screen is tablet-sized and has room for both columns.
+    static func isWide(_ size: CGSize) -> Bool {
+        size.width >= 600 || (size.width > 0 && size.width > size.height)
+    }
 
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -45,6 +59,15 @@ struct SongListView: View {
                 }
             }
         }
+        .background(
+            Color.clear
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { containerSize = $0 }
+                // The keyboard must not flip the layout while searching.
+                .ignoresSafeArea(.keyboard)
+        )
+        // Smooth switch when the screen is folded, unfolded or rotated. Playback lives in AudioPlayer
+        // and the list's state lives here, so neither is lost.
+        .animation(.easeInOut(duration: 0.25), value: isLandscape)
         // Sideways the navigation bar's title and buttons move into the list column, so the cover can use the full height.
         .toolbar(isLandscape ? .hidden : .automatic, for: .navigationBar)
         .onChange(of: player.current == nil) { _, stopped in
@@ -73,6 +96,9 @@ struct SongListView: View {
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
             let fullHeight = geo.size.height + insets.top + insets.bottom
+            // Held sideways the status bar is hidden (top inset 0); on an unfolded inner screen it stays,
+            // so start below it.
+            let top = insets.top
             // Same margin on every side as the portrait layout's side margins.
             let margin: CGFloat = 24
             // The Dynamic Island ends about 11 pt inside the safe-area edge; keep the same gap after it.
@@ -81,7 +107,7 @@ struct SongListView: View {
             let scrubberHeight: CGFloat = 46
             let spacing: CGFloat = 12
             let titleHeight: CGFloat = 46
-            let side = max(min(fullHeight - 2 * margin - titleHeight - scrubberHeight - 2 * spacing,
+            let side = max(min(fullHeight - top - 2 * margin - titleHeight - scrubberHeight - 2 * spacing,
                                geo.size.width * 0.5), 120)
             HStack(spacing: 0) {
                 // Cover, then title and artist, then the playback bar.
@@ -92,7 +118,8 @@ struct SongListView: View {
                     PlaybackScrubber()
                         .frame(width: side)
                 }
-                .padding(.vertical, margin)
+                .padding(.top, top + margin)
+                .padding(.bottom, margin)
                 .padding(.trailing, margin)
                 .padding(.leading, leading)
                 // Pinned to the top so the cover's top edge lines up with the folder name and icons.
@@ -109,7 +136,7 @@ struct SongListView: View {
                 }
                 // Rows already have 16 pt inside, so this ends them `margin` from the screen edge or island.
                 .padding(.trailing, trailing - 16)
-                .padding(.top, margin - 10)
+                .padding(.top, top + margin - 10)
             }
             .ignoresSafeArea(.container, edges: [.top, .horizontal, .bottom])
         }
