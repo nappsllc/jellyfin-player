@@ -10,6 +10,7 @@ A small native iOS (SwiftUI) audio player for Jellyfin. Pick one folder on your 
 - Settings: **Auto-play on launch** (on by default) and **Shuffle**.
 - Mini player with previous / play-pause / next and a scrubber.
 - Keeps playing in the background, with lock screen, Control Center and headphone controls.
+- Adapts to the space it has: player above the list when narrow, side by side when the phone is turned sideways or a foldable iPhone is opened to its large inner screen. Folding, unfolding and rotating keep playback going.
 - Plays the folder on a loop. Formats iOS can't decode are transcoded to AAC by the server automatically.
 
 ## Run it
