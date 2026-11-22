@@ -11,7 +11,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    # iPhone Duo: iOS 27 shows apps built with an SDK older than iOS 27.1 letterboxed (a small phone-sized
+    # window in the middle) on the unfolded inner screen. `xcode-27` is GitHub's image with Xcode 27.x.
+    runs-on: xcode-27
     env:
       # Every build gets a higher version so SideStore offers it as an update.
       APP_VERSION: 1.0.${{ github.run_number }}
@@ -19,9 +21,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select Xcode >= 27.1
+        run: |
+          x=$(ls -d /Applications/Xcode*.app | while read a; do
+                v=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$a/Contents/Info.plist" 2>/dev/null)
+                echo "$v $a"; done | sort -V | tail -1)
+          v=${x%% *}; a=${x#* }
+          echo "Newest Xcode: $v at $a"
+          if [ "$(printf '%s\n27.1\n' "$v" | sort -V | head -1)" != "27.1" ]; then
+            echo "::error::Newest Xcode on this runner is '${v:-none}'; the iPhone Duo inner screen needs >= 27.1"; exit 1
+          fi
+          sudo xcode-select -s "$a/Contents/Developer"
+
       - name: Show Xcode version and schemes
         run: |
           xcodebuild -version
+          xcodebuild -showsdks
           xcodebuild -list -project JellyPlayer.xcodeproj
 
       - name: Build (unsigned)
@@ -37,6 +52,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
+
+      - name: Check the app was built against the iOS 27.1+ SDK
+        run: |
+          sdk=$(/usr/libexec/PlistBuddy -c "Print DTSDKName" build/Release-iphoneos/JellyPlayer.app/Info.plist)
+          echo "Built with $sdk"
+          ver=${sdk#iphoneos}
+          if [ "$(printf '%s\n27.1\n' "$ver" | sort -V | head -1)" != "27.1" ]; then
+            echo "::error::Built with $sdk; the iPhone Duo needs iphoneos27.1 or newer"; exit 1
+          fi
 
       - name: Package IPA
         run: |
