@@ -12,7 +12,8 @@ on:
 
 jobs:
   upload:
-    runs-on: macos-15
+    # Xcode 27.1+ so the app fills the iPhone Duo inner screen (see build-ipa.yml).
+    runs-on: xcode-27
     env:
       APP_VERSION: 1.0.${{ github.run_number }}
       APP_BUILD: ${{ github.run_number }}
